@@ -16,3 +16,5 @@ Suggests:
     org.Hs.eg.db,
     msigdbr,
     parallel
+URL: https://github.com/irislity/BioTrajX
+BugReports: https://github.com/irislity/BioTrajX/issues
