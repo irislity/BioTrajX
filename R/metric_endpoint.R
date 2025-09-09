@@ -1,4 +1,4 @@
-#' Endpoints Validity (E) Metrics
+#' Endpoints Validity (E) Metrics with Robust GMM Handling
 #'
 #' Calculate endpoints validity metrics for pseudotime analysis
 #'
@@ -10,35 +10,23 @@
 #' @param terminal_clusters Character vector of cluster names considered as terminal (for Case 2)
 #' @param method Character, one of "gmm" (Case 1), "clusters" (Case 2), or "combined" (Case 3)
 #' @param plot Logical, whether to generate density plots for GMM
+#' @param min_cells_per_component Minimum cells required per GMM component (default: 10)
+#' @param gmm_retry_methods Vector of fallback methods if GMM fails
+#' @param verbose Logical, whether to print diagnostic messages
 #'
 #' @return An S3 object of class "endpoints_validity" containing all results
-#'
-#' @examples
-#' # Case 1: Using GMM on marker scores
-#' result <- calculate_endpoints_validity(
-#'   pseudotime = pseudotime_vector,
-#'   naive_marker_scores = naive_scores,
-#'   terminal_marker_scores = terminal_scores,
-#'   method = "gmm"
-#' )
-#'
-#' # Case 2: Using cluster labels
-#' result <- calculate_endpoints_validity(
-#'   pseudotime = pseudotime_vector,
-#'   cluster_labels = cluster_vector,
-#'   naive_clusters = c("CD8.NaiveLike"),
-#'   terminal_clusters = c("CD8.TEX", "CD8.TPEX"),
-#'   method = "clusters"
-#' )
 
 metrics_E <- function(pseudotime,
-                                         cluster_labels = NULL,
-                                         naive_marker_scores = NULL,
-                                         terminal_marker_scores = NULL,
-                                         naive_clusters = NULL,
-                                         terminal_clusters = NULL,
-                                         method = c("gmm", "clusters", "combined"),
-                                         plot = TRUE) {
+                      cluster_labels = NULL,
+                      naive_marker_scores = NULL,
+                      terminal_marker_scores = NULL,
+                      naive_clusters = NULL,
+                      terminal_clusters = NULL,
+                      method = c("gmm", "clusters", "combined"),
+                      plot = TRUE,
+                      min_cells_per_component = 10,
+                      gmm_retry_methods = c("quantile", "kmeans", "manual"),
+                      verbose = FALSE) {
 
   # Input validation
   method <- match.arg(method)
@@ -60,7 +48,9 @@ metrics_E <- function(pseudotime,
     E_comp = NA,
     gmm_results = NULL,
     cluster_info = NULL,
-    plots = NULL
+    plots = NULL,
+    warnings = character(0),
+    fallback_used = NULL
   )
 
   # Helper functions
@@ -87,73 +77,247 @@ metrics_E <- function(pseudotime,
     return(E / p)
   }
 
-  create_gmm_labels <- function(scores, label_name) {
-    if (!requireNamespace("mclust", quietly = TRUE)) {
-      stop("Package 'mclust' is required for GMM method")
+  # Robust GMM with multiple fallback strategies
+  create_robust_gmm_labels <- function(scores, label_name) {
+    if (length(scores) < min_cells_per_component * 2) {
+      warning(paste("Too few cells for GMM fitting:", label_name, "- need at least", min_cells_per_component * 2))
+      return(list(labels = rep(NA, length(scores)), fit = NULL, plot_data = NULL, method_used = "insufficient_data"))
     }
 
-    fit <- try(mclust::Mclust(scores, G = 2), silent = TRUE)
+    # Remove NAs and check for variation
+    finite_scores <- scores[is.finite(scores)]
+    if (length(finite_scores) < min_cells_per_component * 2) {
+      warning(paste("Too few finite scores for GMM fitting:", label_name))
+      return(list(labels = rep(NA, length(scores)), fit = NULL, plot_data = NULL, method_used = "insufficient_finite_data"))
+    }
 
-    if (inherits(fit, "try-error")) {
-      warning(paste("GMM fitting failed for", label_name))
+    if (var(finite_scores) < 1e-10) {
+      warning(paste("Insufficient variation in scores for GMM fitting:", label_name))
+      return(list(labels = rep(NA, length(scores)), fit = NULL, plot_data = NULL, method_used = "no_variation"))
+    }
+
+    # Try standard GMM first
+    gmm_result <- try_standard_gmm(scores, label_name)
+    if (!is.null(gmm_result$labels) && !all(is.na(gmm_result$labels))) {
+      return(c(gmm_result, list(method_used = "mclust_gmm")))
+    }
+
+    # Try fallback methods
+    for (fallback_method in gmm_retry_methods) {
+      if (verbose) message(paste("Trying fallback method:", fallback_method, "for", label_name))
+
+      fallback_result <- switch(fallback_method,
+                                "quantile" = try_quantile_split(scores, label_name),
+                                "kmeans" = try_kmeans_split(scores, label_name),
+                                "manual" = try_manual_split(scores, label_name),
+                                NULL
+      )
+
+      if (!is.null(fallback_result$labels) && !all(is.na(fallback_result$labels))) {
+        if (verbose) message(paste("Successfully used fallback method:", fallback_method, "for", label_name))
+        return(c(fallback_result, list(method_used = fallback_method)))
+      }
+    }
+
+    warning(paste("All methods failed for", label_name))
+    return(list(labels = rep(NA, length(scores)), fit = NULL, plot_data = NULL, method_used = "all_failed"))
+  }
+
+  # Standard mclust GMM
+  try_standard_gmm <- function(scores, label_name) {
+    if (!requireNamespace("mclust", quietly = TRUE)) {
+      warning("Package 'mclust' is required for GMM method")
       return(list(labels = rep(NA, length(scores)), fit = NULL, plot_data = NULL))
     }
 
-    # Extract parameters
-    mu <- as.numeric(fit$parameters$mean)
-    sd <- sqrt(as.numeric(fit$parameters$variance$sigmasq))
-    pi <- as.numeric(fit$parameters$pro)
-    ord <- order(mu)
-    mu <- mu[ord]
-    sd <- sd[ord]
-    pi <- pi[ord]  # enforce low=1, high=2
+    # Try different model types if default fails
+    model_types <- c("E", "V", "EII", "VII")
 
-    # Get posterior probabilities for high component
-    post_high <- predict(fit)$z[, ord[2]]  # P(high component | score)
-    labels <- as.integer(post_high >= 0.5)
+    for (model_type in model_types) {
+      fit <- try({
+        mclust::Mclust(scores, G = 2, modelNames = model_type, verbose = FALSE)
+      }, silent = TRUE)
 
-    # Prepare plot data
-    plot_data <- NULL
-    if (plot) {
-      s <- scores
-      ok <- is.finite(s)
-      x <- s[ok]
-      lab <- labels[ok]
+      if (!inherits(fit, "try-error") && !is.null(fit)) {
+        if (verbose && model_type != "E") {
+          message(paste("GMM succeeded with model type:", model_type, "for", label_name))
+        }
 
-      plot_data <- list(
-        x = x,
-        labels = lab,
-        title = paste("Score density with GMM labels -", label_name),
-        fit_params = list(mu = mu, sd = sd, pi = pi)
-      )
+        # Validate the fit
+        if (is.null(fit$parameters) || is.null(fit$classification)) {
+          next
+        }
+
+        # Check component sizes
+        component_sizes <- table(fit$classification)
+        if (any(component_sizes < min_cells_per_component)) {
+          if (verbose) message(paste("Components too small for", label_name, "- trying next model"))
+          next
+        }
+
+        # Extract parameters safely
+        mu <- tryCatch({
+          as.numeric(fit$parameters$mean)
+        }, error = function(e) NULL)
+
+        if (is.null(mu) || length(mu) != 2) {
+          next
+        }
+
+        # Order components by mean
+        ord <- order(mu)
+
+        # Get posterior probabilities for high component
+        post_probs <- tryCatch({
+          predict(fit)$z
+        }, error = function(e) {
+          # Fallback to classification
+          matrix(0, nrow = length(scores), ncol = 2)
+        })
+
+        if (ncol(post_probs) >= 2) {
+          post_high <- post_probs[, ord[2]]  # P(high component | score)
+          labels <- as.integer(post_high >= 0.5)
+        } else {
+          # Use classification directly
+          labels <- as.integer(fit$classification == ord[2])
+        }
+
+        # Prepare plot data
+        plot_data <- NULL
+        if (plot) {
+          s <- scores
+          ok <- is.finite(s)
+          x <- s[ok]
+          lab <- labels[ok]
+
+          if (length(mu) == 2) {
+            # Extract variance safely
+            variance <- tryCatch({
+              if (is.matrix(fit$parameters$variance$sigmasq)) {
+                diag(fit$parameters$variance$sigmasq)
+              } else {
+                as.numeric(fit$parameters$variance$sigmasq)
+              }
+            }, error = function(e) rep(1, 2))
+
+            sd <- sqrt(variance)
+            pi <- as.numeric(fit$parameters$pro)
+
+            if (length(sd) == 2 && length(pi) == 2) {
+              plot_data <- list(
+                x = x,
+                labels = lab,
+                title = paste("Score density with GMM labels -", label_name),
+                fit_params = list(mu = mu[ord], sd = sd[ord], pi = pi[ord])
+              )
+            }
+          }
+        }
+
+        return(list(labels = labels, fit = fit, plot_data = plot_data))
+      }
     }
 
-    return(list(labels = labels, fit = fit, plot_data = plot_data))
+    return(list(labels = rep(NA, length(scores)), fit = NULL, plot_data = NULL))
   }
 
-  create_density_plot <- function(plot_data) {
+  # Fallback: Quantile-based split
+  try_quantile_split <- function(scores, label_name) {
+    finite_scores <- scores[is.finite(scores)]
+    if (length(finite_scores) < 10) return(NULL)
+
+    # Use 75th percentile as threshold (or median if too few high scorers)
+    threshold <- quantile(finite_scores, 0.75, na.rm = TRUE)
+    high_count <- sum(finite_scores > threshold)
+
+    # Adjust threshold if too few cells in high group
+    if (high_count < min_cells_per_component) {
+      threshold <- quantile(finite_scores, 0.5, na.rm = TRUE)
+    }
+
+    labels <- as.integer(scores > threshold)
+    labels[!is.finite(scores)] <- NA
+
+    plot_data <- if (plot) {
+      list(x = finite_scores, labels = labels[is.finite(scores)],
+           title = paste("Quantile split -", label_name))
+    } else NULL
+
+    return(list(labels = labels, fit = NULL, plot_data = plot_data))
+  }
+
+  # Fallback: K-means clustering
+  try_kmeans_split <- function(scores, label_name) {
+    finite_scores <- scores[is.finite(scores)]
+    if (length(finite_scores) < 10) return(NULL)
+
+    kmeans_result <- try({
+      kmeans(finite_scores, centers = 2, nstart = 10)
+    }, silent = TRUE)
+
+    if (inherits(kmeans_result, "try-error")) return(NULL)
+
+    # Order clusters by center value
+    center_order <- order(kmeans_result$centers)
+    labels <- rep(NA_integer_, length(scores))
+    labels[is.finite(scores)] <- as.integer(kmeans_result$cluster == center_order[2])
+
+    plot_data <- if (plot) {
+      list(x = finite_scores, labels = labels[is.finite(scores)],
+           title = paste("K-means split -", label_name))
+    } else NULL
+
+    return(list(labels = labels, fit = NULL, plot_data = plot_data))
+  }
+
+  # Fallback: Manual threshold based on distribution
+  try_manual_split <- function(scores, label_name) {
+    finite_scores <- scores[is.finite(scores)]
+    if (length(finite_scores) < 10) return(NULL)
+
+    # Use mean + 0.5*sd as threshold
+    threshold <- mean(finite_scores) + 0.5 * sd(finite_scores)
+    labels <- as.integer(scores > threshold)
+    labels[!is.finite(scores)] <- NA
+
+    plot_data <- if (plot) {
+      list(x = finite_scores, labels = labels[is.finite(scores)],
+           title = paste("Manual threshold split -", label_name))
+    } else NULL
+
+    return(list(labels = labels, fit = NULL, plot_data = plot_data))
+  }
+
+  # Enhanced plotting function
+  create_density_plot <- function(plot_data, method_used = "GMM") {
     if (is.null(plot_data)) return(NULL)
 
     x <- plot_data$x
     lab <- plot_data$labels
-    d_all <- density(x)
-    ylim <- c(0, max(d_all$y) * 2.5)
 
-    plot(density(x), main = plot_data$title, xlab = "Module score",
-         ylab = "Density", ylim = ylim)
+    if (length(x) < 2 || all(is.na(lab))) return(NULL)
 
+    d_all <- density(x, na.rm = TRUE)
+    ylim <- c(0, max(d_all$y, na.rm = TRUE) * 1.2)
+
+    plot(d_all, main = paste(plot_data$title, "(", method_used, ")"),
+         xlab = "Module score", ylab = "Density", ylim = ylim)
+
+    # Plot class-specific densities if enough data
     if (sum(lab == 1, na.rm = TRUE) >= 2) {
-      lines(density(x[lab == 1]), col = "tomato", lwd = 2)
+      lines(density(x[lab == 1 & !is.na(lab)], na.rm = TRUE), col = "tomato", lwd = 2)
     }
     if (sum(lab == 0, na.rm = TRUE) >= 2) {
-      lines(density(x[lab == 0]), col = "steelblue", lwd = 2, lty = 2)
+      lines(density(x[lab == 0 & !is.na(lab)], na.rm = TRUE), col = "steelblue", lwd = 2, lty = 2)
     }
 
-    rug(x[lab == 1], col = "tomato", ticksize = 0.03)
-    rug(x[lab == 0], col = "steelblue", ticksize = 0.02)
+    # Add rug plots
+    rug(x[lab == 1 & !is.na(lab)], col = "tomato", ticksize = 0.03)
+    rug(x[lab == 0 & !is.na(lab)], col = "steelblue", ticksize = 0.02)
 
     legend("topright",
-           c("All", "Label=1 (high comp)", "Label=0 (low comp)"),
+           c("All", "Label=1 (high)", "Label=0 (low)"),
            lwd = c(1, 2, 2), lty = c(1, 1, 2),
            col = c("black", "tomato", "steelblue"), bty = "n")
   }
@@ -169,18 +333,19 @@ metrics_E <- function(pseudotime,
       stop("Marker scores must have the same length as pseudotime")
     }
 
-    # Fit GMM for naive markers
-    naive_gmm <- create_gmm_labels(naive_marker_scores, "Naive markers")
-    terminal_gmm <- create_gmm_labels(terminal_marker_scores, "Terminal markers")
+    # Fit robust GMM for naive markers
+    naive_gmm <- create_robust_gmm_labels(naive_marker_scores, "Naive markers")
+    terminal_gmm <- create_robust_gmm_labels(terminal_marker_scores, "Terminal markers")
 
     result$naive_labels <- naive_gmm$labels
     result$terminal_labels <- terminal_gmm$labels
     result$gmm_results <- list(naive = naive_gmm$fit, terminal = terminal_gmm$fit)
+    result$fallback_used <- list(naive = naive_gmm$method_used, terminal = terminal_gmm$method_used)
 
     if (plot) {
       par(mfrow = c(1, 2))
-      create_density_plot(naive_gmm$plot_data)
-      create_density_plot(terminal_gmm$plot_data)
+      create_density_plot(naive_gmm$plot_data, naive_gmm$method_used)
+      create_density_plot(terminal_gmm$plot_data, terminal_gmm$method_used)
       par(mfrow = c(1, 1))
     }
 
@@ -211,8 +376,51 @@ metrics_E <- function(pseudotime,
     )
 
   } else if (method == "combined") {
-    # Case 3: Combined approach
-    stop("Combined method not yet implemented. Please use 'gmm' or 'clusters' method.")
+    # Case 3: Combined approach - try GMM first, fall back to clusters
+    if (verbose) message("Using combined method: trying GMM first, then clusters as fallback")
+
+    gmm_success <- FALSE
+
+    if (!is.null(naive_marker_scores) && !is.null(terminal_marker_scores)) {
+      naive_gmm <- create_robust_gmm_labels(naive_marker_scores, "Naive markers")
+      terminal_gmm <- create_robust_gmm_labels(terminal_marker_scores, "Terminal markers")
+
+      if (!all(is.na(naive_gmm$labels)) && !all(is.na(terminal_gmm$labels))) {
+        result$naive_labels <- naive_gmm$labels
+        result$terminal_labels <- terminal_gmm$labels
+        result$gmm_results <- list(naive = naive_gmm$fit, terminal = terminal_gmm$fit)
+        result$fallback_used <- list(naive = naive_gmm$method_used, terminal = terminal_gmm$method_used)
+        gmm_success <- TRUE
+
+        if (plot) {
+          par(mfrow = c(1, 2))
+          create_density_plot(naive_gmm$plot_data, naive_gmm$method_used)
+          create_density_plot(terminal_gmm$plot_data, terminal_gmm$method_used)
+          par(mfrow = c(1, 1))
+        }
+      }
+    }
+
+    # Fall back to clusters if GMM failed
+    if (!gmm_success) {
+      if (verbose) message("GMM failed, falling back to cluster method")
+
+      if (!is.null(cluster_labels) && !is.null(naive_clusters) && !is.null(terminal_clusters)) {
+        result$naive_labels <- as.integer(cluster_labels %in% naive_clusters)
+        result$terminal_labels <- as.integer(cluster_labels %in% terminal_clusters)
+        result$fallback_used <- list(method = "clusters")
+
+        result$cluster_info <- list(
+          unique_clusters = unique(cluster_labels),
+          naive_clusters = naive_clusters,
+          terminal_clusters = terminal_clusters,
+          naive_count = sum(result$naive_labels),
+          terminal_count = sum(result$terminal_labels)
+        )
+      } else {
+        stop("Combined method failed: GMM unsuccessful and cluster information incomplete")
+      }
+    }
   }
 
   # Calculate metrics
@@ -256,13 +464,22 @@ metrics_E <- function(pseudotime,
 #' @param x An endpoints_validity object
 #' @param ... Additional arguments (not used)
 #'
-#' @export
 print.endpoints_validity <- function(x, ...) {
   cat("Endpoints Validity Analysis\n")
   cat("==========================\n\n")
 
   cat("Method:", x$method, "\n")
-  cat("Number of cells:", x$n_cells, "\n\n")
+  cat("Number of cells:", x$n_cells, "\n")
+
+  if (!is.null(x$fallback_used)) {
+    if (is.list(x$fallback_used) && !is.null(x$fallback_used$naive)) {
+      cat("Naive method used:", x$fallback_used$naive, "\n")
+      cat("Terminal method used:", x$fallback_used$terminal, "\n")
+    } else if (!is.null(x$fallback_used$method)) {
+      cat("Fallback method used:", x$fallback_used$method, "\n")
+    }
+  }
+  cat("\n")
 
   cat("Cell counts:\n")
   cat("  Naive cells:", x$summary$n_naive, "(", sprintf("%.1f%%", x$summary$prop_naive * 100), ")\n")
@@ -285,7 +502,6 @@ print.endpoints_validity <- function(x, ...) {
 #' @param object An endpoints_validity object
 #' @param ... Additional arguments (not used)
 #'
-#' @export
 summary.endpoints_validity <- function(object, ...) {
   print(object)
 
@@ -293,15 +509,18 @@ summary.endpoints_validity <- function(object, ...) {
     cat("\nGMM fitting results:\n")
     if (!is.null(object$gmm_results$naive)) {
       cat("  Naive markers: Successfully fitted 2-component GMM\n")
+    } else if (!is.null(object$fallback_used$naive)) {
+      cat("  Naive markers: Used fallback method -", object$fallback_used$naive, "\n")
     }
     if (!is.null(object$gmm_results$terminal)) {
       cat("  Terminal markers: Successfully fitted 2-component GMM\n")
+    } else if (!is.null(object$fallback_used$terminal)) {
+      cat("  Terminal markers: Used fallback method -", object$fallback_used$terminal, "\n")
     }
   }
 
   invisible(object)
 }
-
 # Example usage:
 #
 # # Case 1: Using GMM

@@ -53,8 +53,6 @@
 #'   terminal_markers = c("GZMB", "PRF1", "IFNG"),
 #'   pathways = c("hsa04660", "hsa04658"),
 #'   E_method = "gmm",
-#'   naive_marker_scores = naive_scores,
-#'   terminal_marker_scores = terminal_scores,
 #'   parallel = TRUE
 #' )
 #'
@@ -244,6 +242,73 @@ compute_multi_DOPE <- function(expr_or_seurat,
   }
 }
 
+# function for getting naive or terminal gene scores
+.per_cell_score <- function(expr, markers) {
+  genes <- intersect(markers, rownames(expr))
+  if (length(genes) == 0) {
+    warning("No markers found in expression matrix.")
+    return(rep(NA_real_, ncol(expr)))
+  }
+  mark_expr <- expr[genes, , drop = FALSE]
+  colSums(mark_expr) / length(genes)
+}
+
+
+
+# Helper function for null coalescing (moved to top for availability)
+`%||%` <- function(x, y) if (is.null(x) || (length(x) == 1 && is.na(x))) y else x
+
+#' Helper function to extract expression data from Seurat object or matrix
+.get_expr <- function(x, assay = NULL, slot = "data") {
+  if (inherits(x, "Seurat")) {
+    if (is.null(assay)) assay <- Seurat::DefaultAssay(x)
+    return(as.matrix(Seurat::GetAssayData(x, assay = assay, slot = slot)))
+  } else if (is.matrix(x)) {
+    return(x)
+  } else {
+    stop("expr_or_seurat must be a matrix or a Seurat object")
+  }
+}
+
+#' Function for getting naive or terminal gene scores
+.per_cell_score <- function(expr, markers) {
+  # Ensure expr is a matrix
+  if (!is.matrix(expr)) {
+    expr <- .get_expr(expr)
+  }
+
+  genes <- intersect(markers, rownames(expr))
+  if (length(genes) == 0) {
+    warning("No markers found in expression matrix.")
+    return(rep(NA_real_, ncol(expr)))
+  }
+  mark_expr <- expr[genes, , drop = FALSE]
+  colSums(mark_expr) / length(genes)
+}
+
+#' Compute DOPE for a single trajectory
+#'
+#' @param expr_or_seurat Expression matrix or Seurat object
+#' @param pseudotime Vector of pseudotime values
+#' @param naive_markers Vector of naive marker genes
+#' @param terminal_markers Vector of terminal marker genes
+#' @param cluster_labels Vector of cluster labels (optional)
+#' @param naive_clusters Vector of naive cluster identities (optional)
+#' @param terminal_clusters Vector of terminal cluster identities (optional)
+#' @param pathways List of pathway gene sets (optional)
+#' @param gene_sets Alternative gene sets (optional)
+#' @param E_method Method for computing E metric
+#' @param id_type Gene identifier type
+#' @param species Species for pathway analysis
+#' @param assay Assay name for Seurat objects
+#' @param slot Slot name for Seurat objects
+#' @param min_remaining Minimum remaining genes for pathway analysis
+#' @param min_fraction Minimum fraction for pathway analysis
+#' @param min_genes_per_module Minimum genes per pathway module
+#' @param tol Tolerance for numerical computations
+#' @param plot_E Whether to plot E metric results
+#' @param verbose Whether to print verbose output
+#' @return List containing DOPE results
 compute_DOPE_single <- function(expr_or_seurat,
                                 pseudotime,
                                 naive_markers,
@@ -268,29 +333,45 @@ compute_DOPE_single <- function(expr_or_seurat,
   E_method <- match.arg(E_method)
   id_type  <- match.arg(id_type)
 
-  expr_mat <- .get_expr(expr_or_seurat, assay = assay, slot = slot)
+  # Extract expression matrix
+  expr <- .get_expr(expr_or_seurat, assay = assay, slot = slot)
 
-  D_res <- tryCatch(
-    metrics_D(expr_mat, naive_markers, terminal_markers, pseudotime),
-    error = function(e) {
-      list(D_naive = NA_real_, D_term = NA_real_,
-           s_i_naive = rep(NA_real_, length(pseudotime)),
-           s_i_term = rep(NA_real_, length(pseudotime)),
-           error = e$message)
-    })
+  # Validate inputs
+  if (length(pseudotime) != ncol(expr)) {
+    stop("Length of pseudotime must match number of cells in expression data")
+  }
 
-  O_res <- tryCatch(
-    metrics_O(expr_or_seurat,
+  if (!is.null(cluster_labels) && length(cluster_labels) != ncol(expr)) {
+    stop("Length of cluster_labels must match number of cells in expression data")
+  }
+
+  # Compute D metrics
+  D_res <- tryCatch({
+    metrics_D(expr, naive_markers, terminal_markers, pseudotime)
+  }, error = function(e) {
+    if (verbose) message("D metric failed: ", e$message)
+    list(D_naive = NA_real_, D_term = NA_real_, error = e$message)
+  })
+
+  # Compute per-cell scores for markers
+  naive_scores <- .per_cell_score(expr_or_seurat, naive_markers)
+  term_scores  <- .per_cell_score(expr_or_seurat, terminal_markers)
+
+  # Compute O metrics
+  O_res <- tryCatch({
+    metrics_O(expr,
               naive_markers,
               terminal_markers,
               pseudotime,
-              tol = 1e-8),
-    error = function(e) { message("O failed: ", e$message)
-      list(O = NA_real_, error = e$message) }
-  )
+              tol = tol)
+  }, error = function(e) {
+    if (verbose) message("O metric failed: ", e$message)
+    list(O = NA_real_, error = e$message)
+  })
 
-  P_res <- tryCatch(
-    metrics_P(expr_or_seurat,
+  # Compute P metrics
+  P_res <- tryCatch({
+    metrics_P(expr,
               pseudotime,
               pathways = pathways,
               gene_sets = gene_sets,
@@ -299,43 +380,84 @@ compute_DOPE_single <- function(expr_or_seurat,
               id_type = id_type,
               species = species,
               assay = assay,
-              slot  = slot,
+              slot = slot,
               min_remaining = min_remaining,
-              min_fraction  = min_fraction,
+              min_fraction = min_fraction,
               min_genes_per_module = min_genes_per_module,
-              verbose = verbose),
-    error = function(e) list(P = NA_real_, error = e$message)
-  )
+              verbose = verbose)
+  }, error = function(e) {
+    if (verbose) message("P metric failed: ", e$message)
+    list(P = NA_real_, error = e$message)
+  })
 
-
-  E_res <- tryCatch(
+  # Compute E metrics
+  E_res <- tryCatch({
     metrics_E(pseudotime,
               cluster_labels = cluster_labels,
-              naive_marker_scores = D_res$s_i_naive,
-              terminal_marker_scores = D_res$s_i_term,
+              naive_marker_scores = naive_scores,
+              terminal_marker_scores = term_scores,
               naive_clusters = naive_clusters,
               terminal_clusters = terminal_clusters,
               method = E_method,
-              plot = plot_E),
-    error = function(e) list(E_naive = NA_real_, E_term = NA_real_, E_comp = NA_real_, error = e$message)
+              plot = plot_E)
+  }, error = function(e) {
+    if (verbose) message("E metric failed: ", e$message)
+    list(E_naive = NA_real_, E_term = NA_real_, E_comp = NA_real_, error = e$message)
+  })
+
+  # Calculate composite DOPE score
+  comp_vec <- c(
+    D_res$D_naive %||% NA_real_,
+    D_res$D_term %||% NA_real_,
+    O_res$O %||% NA_real_,
+    P_res$P %||% NA_real_,
+    E_res$E_comp %||% NA_real_
   )
 
-  comp_vec <- c(D_res$D_naive,D_res$D_term, O_res$O, P_res$P, E_res$E_comp)
-  DOPE_score <- if (all(is.na(comp_vec))) NA_real_ else mean(comp_vec, na.rm = TRUE)
+  DOPE_score <- if (all(is.na(comp_vec))) {
+    NA_real_
+  } else {
+    mean(comp_vec, na.rm = TRUE)
+  }
 
+  # Compile results
   out <- list(
-    D = list(D_naive = D_res$D_naive, D_term = D_res$D_term),
-    O = list(O = O_res$O),
-    P = list(P = P_res$P),
-    E = list(E_naive = E_res$E_naive, E_term = E_res$E_term, E_comp = E_res$E_comp),
-    DOPE_score = DOPE_score
+    D = list(
+      D_naive = D_res$D_naive %||% NA_real_,
+      D_term = D_res$D_term %||% NA_real_
+    ),
+    O = list(O = O_res$O %||% NA_real_),
+    P = list(P = P_res$P %||% NA_real_),
+    E = list(
+      E_naive = E_res$E_naive %||% NA_real_,
+      E_term = E_res$E_term %||% NA_real_,
+      E_comp = E_res$E_comp %||% NA_real_
+    ),
+    DOPE_score = DOPE_score,
+    # Include any errors that occurred
+    errors = list(
+      D_error = D_res$error,
+      O_error = O_res$error,
+      P_error = P_res$error,
+      E_error = E_res$error
+    )
   )
+
   class(out) <- "dope_results"
-  out
+  return(out)
 }
+
 #' Create comparison summary across trajectories
+#'
+#' @param trajectory_results List of trajectory results from compute_DOPE_single
+#' @return Data frame with comparison summary and rankings
 create_comparison_summary <- function(trajectory_results) {
 
+  if (length(trajectory_results) == 0) {
+    stop("trajectory_results cannot be empty")
+  }
+
+  # Initialize summary data frame
   summary_data <- data.frame(
     trajectory = character(),
     D_naive = numeric(),
@@ -350,41 +472,51 @@ create_comparison_summary <- function(trajectory_results) {
     stringsAsFactors = FALSE
   )
 
+  # Extract data for each trajectory
   for (i in seq_along(trajectory_results)) {
     result <- trajectory_results[[i]]
-    trajectory_name <- names(trajectory_results)[i]
+    trajectory_name <- names(trajectory_results)[i] %||% paste0("Trajectory_", i)
 
-    summary_data <- rbind(summary_data, data.frame(
+    # Check if any errors occurred
+    has_error <- any(sapply(result$errors, function(x) !is.null(x)))
+
+    # Create row for this trajectory
+    row_data <- data.frame(
       trajectory = trajectory_name,
-      D_naive = result$D$D_naive %||% NA,
-      D_term = result$D$D_term %||% NA,
-      O = result$O$O %||% NA,
-      P = result$P$P %||% NA,
-      E_naive = result$E$E_naive %||% NA,
-      E_term = result$E$E_term %||% NA,
-      E_comp = result$E$E_comp %||% NA,
-      DOPE_score = result$DOPE_score %||% NA,
-      has_error = !is.null(result$error),
+      D_naive = result$D$D_naive %||% NA_real_,
+      D_term = result$D$D_term %||% NA_real_,
+      O = result$O$O %||% NA_real_,
+      P = result$P$P %||% NA_real_,
+      E_naive = result$E$E_naive %||% NA_real_,
+      E_term = result$E$E_term %||% NA_real_,
+      E_comp = result$E$E_comp %||% NA_real_,
+      DOPE_score = result$DOPE_score %||% NA_real_,
+      has_error = has_error,
       stringsAsFactors = FALSE
-    ))
+    )
+
+    summary_data <- rbind(summary_data, row_data)
   }
 
-  # Add rankings
-  metrics <- c("D_naive", "D_term", "O", "P", "E_naive", "E_term","DOPE_score")
+  # Add rankings for each metric (higher scores = better ranks)
+  metrics <- c("D_naive", "D_term", "O", "P", "E_naive", "E_term", "E_comp", "DOPE_score")
   for (metric in metrics) {
     rank_col <- paste0(metric, "_rank")
-    summary_data[[rank_col]] <- rank(-summary_data[[metric]], na.last = "keep", ties.method = "min")
+    summary_data[[rank_col]] <- rank(-summary_data[[metric]],
+                                     na.last = "keep",
+                                     ties.method = "min")
   }
 
   # Sort by DOPE score (best first)
-  summary_data <- summary_data[order(summary_data$DOPE_score, decreasing = TRUE, na.last = TRUE), ]
+  summary_data <- summary_data[order(summary_data$DOPE_score,
+                                     decreasing = TRUE,
+                                     na.last = TRUE), ]
+
+  # Reset row names
+  rownames(summary_data) <- NULL
 
   return(summary_data)
 }
-
-# Helper function for null coalescing
-`%||%` <- function(x, y) if (is.null(x) || (length(x) == 1 && is.na(x))) y else x
-
 #' Print method for multi-DOPE results
 #'
 #' @param x A multi_dope_results object
