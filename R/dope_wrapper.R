@@ -25,7 +25,6 @@
 #' @param species Species label for msigdbr in P metric (default "Homo sapiens").
 #' @param assay,slot If a Seurat object is provided, which assay/slot to pull for P metric (default: current assay, slot "data").
 #' @param min_remaining,min_fraction,min_genes_per_module Parameters for P metric pathway filtering.
-#' @param tol Numeric tolerance for O metric tied changes (default 1e-8).
 #' @param plot_E Logical, whether to generate density plots for E metric GMM.
 #' @param verbose Logical; print progress messages.
 #' @param parallel Logical; whether to use parallel processing for multiple trajectories.
@@ -57,6 +56,265 @@
 #' # )
 #'
 #' @export
+# ===============================
+# DOPE: Multi-trajectory wrapper
+# (linear or branched) — single file
+# ===============================
+
+# ---------- Small utilities ----------
+`%||%` <- function(x, y) if (is.null(x) || (length(x) == 1 && is.na(x))) y else x
+
+# Detect whether a function supports an argument by name
+.has_formal <- function(fun, arg) {
+  is.function(fun) && !is.null(names(formals(fun))) && arg %in% names(formals(fun))
+}
+
+# ---------- Data access & alignment ----------
+.get_expr <- function(x, assay = NULL, slot = "data") {
+  if (inherits(x, "Seurat")) {
+    if (!requireNamespace("Seurat", quietly = TRUE))
+      stop("Seurat object provided but Seurat package is not available.")
+    if (is.null(assay)) assay <- Seurat::DefaultAssay(x)
+    return(as.matrix(Seurat::GetAssayData(x, assay = assay, slot = slot)))
+  } else if (is.matrix(x) || inherits(x, "dgCMatrix")) {
+    return(as.matrix(x))
+  } else if (is.data.frame(x)) {
+    return(as.matrix(x))
+  } else {
+    stop("expr_or_seurat must be a matrix/data.frame/dgCMatrix or a Seurat object")
+  }
+}
+
+.align_to_cells <- function(x, target_cells, what = "vector") {
+  if (!is.null(names(x))) {
+    miss <- setdiff(target_cells, names(x))
+    if (length(miss))
+      stop("Named ", what, " is missing cells: ", paste(head(miss, 6), collapse = ", "),
+           if (length(miss) > 6) " ...")
+    x[target_cells]
+  } else {
+    if (length(x) != length(target_cells))
+      stop("Length of ", what, " (", length(x), ") must match number of cells (", length(target_cells), "). ",
+           "Provide names(x) to align by cell names.")
+    x
+  }
+}
+
+.per_cell_score <- function(expr_or_seurat, markers) {
+  expr <- if (is.matrix(expr_or_seurat) || inherits(expr_or_seurat, "dgCMatrix") || is.data.frame(expr_or_seurat)) {
+    as.matrix(expr_or_seurat)
+  } else {
+    .get_expr(expr_or_seurat)
+  }
+  genes <- intersect(markers, rownames(expr))
+  if (length(genes) == 0) {
+    warning("No markers found in expression matrix.")
+    return(rep(NA_real_, ncol(expr)))
+  }
+  colSums(expr[genes, , drop = FALSE]) / length(genes)
+}
+
+# ---------- Simple branch subsetting helper ----------
+# Works for Seurat or vector cluster labels; supports include/exclude, min_cells, level dropping
+subset_by_clusters <- function(expr_or_seurat,
+                               clusters,
+                               include = NULL,
+                               exclude = NULL,
+                               min_cells = 10,
+                               drop_unused_levels = TRUE,
+                               assay = NULL) {
+  if (inherits(expr_or_seurat, "Seurat")) {
+    all_cells <- Seurat::Cells(expr_or_seurat)
+  } else {
+    x <- .get_expr(expr_or_seurat, assay = assay, slot = "data")
+    all_cells <- colnames(x)
+  }
+  clusters <- .align_to_cells(clusters, all_cells, what = "cluster_labels")
+
+  keep <- rep(TRUE, length(all_cells))
+  if (!is.null(include)) keep <- clusters %in% include
+  if (!is.null(exclude)) keep <- keep & !(clusters %in% exclude)
+  idx <- which(keep)
+
+  if (length(idx) < min_cells)
+    stop("Branch subsetting left ", length(idx), " cells (< ", min_cells, ").")
+
+  kept_cells <- all_cells[idx]
+  if (inherits(expr_or_seurat, "Seurat")) {
+    sub_obj <- subset(expr_or_seurat, cells = kept_cells)
+    new_clusters <- sub_obj[[colnames(expr_or_seurat[[]])[match(TRUE, colnames(expr_or_seurat[[]]) == colnames(expr_or_seurat[[]])[1])]]] # dummy to avoid NSE
+    # Safer: recompute from original clusters
+    new_clusters <- clusters[kept_cells]
+    if (drop_unused_levels) new_clusters <- as.character(factor(new_clusters))
+    return(list(obj = sub_obj, cluster_labels = new_clusters))
+  } else {
+    mat <- .get_expr(expr_or_seurat, assay = assay, slot = "data")
+    sub_mat <- mat[, kept_cells, drop = FALSE]
+    new_clusters <- clusters[kept_cells]
+    if (drop_unused_levels) new_clusters <- as.character(factor(new_clusters))
+    return(list(obj = sub_mat, cluster_labels = new_clusters))
+  }
+}
+
+# ===============================
+# Core single-trajectory wrapper
+# ===============================
+#' Compute DOPE for a single trajectory (linear or branched)
+#' @export
+compute_DOPE_single <- function(expr_or_seurat,
+                                pseudotime,
+                                naive_markers,
+                                terminal_markers,
+                                cluster_labels = NULL,
+                                naive_clusters = NULL,
+                                terminal_clusters = NULL,
+                                pathways = NULL,
+                                gene_sets = NULL,
+                                E_method = c("gmm", "clusters", "combined"),
+                                id_type = c("SYMBOL", "ENSEMBL", "ENTREZID"),
+                                species = "Homo sapiens",
+                                assay = NULL,
+                                slot = "data",
+                                min_remaining = 10,
+                                min_fraction = 0.20,
+                                min_genes_per_module = 3,
+                                plot_E = TRUE,
+                                verbose = FALSE,
+                                trajectory = c("linear","branched"),
+                                branch_include = NULL,
+                                branch_exclude = NULL,
+                                branch_min_cells = 10,
+                                drop_unused_levels = TRUE,
+                                tol = 1e-8) {
+  E_method   <- match.arg(E_method)
+  id_type    <- match.arg(id_type)
+  trajectory <- match.arg(trajectory)
+
+  expr <- .get_expr(expr_or_seurat, assay = assay, slot = slot)
+  cells_all <- if (inherits(expr_or_seurat, "Seurat")) Seurat::Cells(expr_or_seurat) else colnames(expr)
+
+  # align provided vectors to cell order
+  pseudotime <- .align_to_cells(pseudotime, cells_all, what = "pseudotime")
+  if (!is.null(cluster_labels)) {
+    if (!(inherits(expr_or_seurat, "Seurat") && is.character(cluster_labels) && length(cluster_labels) == 1)) {
+      cluster_labels <- .align_to_cells(cluster_labels, cells_all, what = "cluster_labels")
+    }
+  }
+
+  # branched: subset first
+  if (trajectory == "branched") {
+    if (is.null(cluster_labels)) {
+      stop("For trajectory='branched', provide 'cluster_labels' (Seurat meta column or per-cell vector).")
+    }
+    sub <- subset_by_clusters(
+      expr_or_seurat = expr_or_seurat,
+      clusters = if (inherits(expr_or_seurat, "Seurat") && is.character(cluster_labels) && length(cluster_labels) == 1)
+        expr_or_seurat[[cluster_labels]][,1,drop=TRUE] else cluster_labels,
+      include = branch_include,
+      exclude = branch_exclude,
+      min_cells = branch_min_cells,
+      drop_unused_levels = drop_unused_levels,
+      assay = assay
+    )
+    expr <- .get_expr(sub$obj, assay = assay, slot = slot)
+    kept_cells <- if (inherits(sub$obj, "Seurat")) Seurat::Cells(sub$obj) else colnames(expr)
+    pseudotime <- .align_to_cells(pseudotime, kept_cells, what = "pseudotime")
+    cluster_labels <- sub$cluster_labels
+  }
+
+  if (length(pseudotime) != ncol(expr)) {
+    stop("Length of pseudotime must match number of cells in expression data after alignment/subsetting.")
+  }
+  if (!is.null(cluster_labels) && length(cluster_labels) != ncol(expr)) {
+    stop("Length of cluster_labels must match number of cells in expression data after alignment/subsetting.")
+  }
+
+  # ---- D metric
+  D_res <- tryCatch({
+    metrics_D(expr, naive_markers, terminal_markers, pseudotime)
+  }, error = function(e) {
+    if (verbose) message("D metric failed: ", e$message)
+    list(D_naive = NA_real_, D_term = NA_real_, error = e$message)
+  })
+
+  # Precompute marker scores (E metric)
+  naive_scores <- .per_cell_score(expr, naive_markers)
+  term_scores  <- .per_cell_score(expr, terminal_markers)
+
+  # ---- O metric (conditionally pass tol)
+  O_res <- tryCatch({
+    if (.has_formal(metrics_O, "tol")) {
+      metrics_O(expr, naive_markers, terminal_markers, pseudotime, tol = tol)
+    } else {
+      metrics_O(expr, naive_markers, terminal_markers, pseudotime)
+    }
+  }, error = function(e) {
+    if (verbose) message("O metric failed: ", e$message)
+    list(O = NA_real_, error = e$message)
+  })
+
+  # ---- P metric
+  P_res <- tryCatch({
+    metrics_P(expr,
+              pseudotime,
+              pathways = pathways,
+              gene_sets = gene_sets,
+              naive_markers = naive_markers,
+              terminal_markers = terminal_markers,
+              id_type = id_type,
+              species = species,
+              assay = assay,
+              slot = slot,
+              min_remaining = min_remaining,
+              min_fraction = min_fraction,
+              min_genes_per_module = min_genes_per_module,
+              verbose = verbose)
+  }, error = function(e) {
+    if (verbose) message("P metric failed: ", e$message)
+    list(P = NA_real_, error = e$message)
+  })
+
+  # ---- E metric
+  E_res <- tryCatch({
+    metrics_E(pseudotime,
+              cluster_labels = cluster_labels,
+              naive_marker_scores = naive_scores,
+              terminal_marker_scores = term_scores,
+              naive_clusters = naive_clusters,
+              terminal_clusters = terminal_clusters,
+              method = E_method,
+              plot = plot_E)
+  }, error = function(e) {
+    if (verbose) message("E metric failed: ", e$message)
+    list(E_naive = NA_real_, E_term = NA_real_, E_comp = NA_real_, error = e$message)
+  })
+
+  comp_vec <- c(
+    D_res$D_naive %||% NA_real_,
+    D_res$D_term  %||% NA_real_,
+    O_res$O       %||% NA_real_,
+    P_res$P       %||% NA_real_,
+    E_res$E_comp  %||% NA_real_
+  )
+  DOPE_score <- if (all(is.na(comp_vec))) NA_real_ else mean(comp_vec, na.rm = TRUE)
+
+  out <- list(
+    D = list(D_naive = D_res$D_naive %||% NA_real_, D_term = D_res$D_term %||% NA_real_),
+    O = list(O = O_res$O %||% NA_real_),
+    P = list(P = P_res$P %||% NA_real_),
+    E = list(E_naive = E_res$E_naive %||% NA_real_, E_term = E_res$E_term %||% NA_real_, E_comp = E_res$E_comp %||% NA_real_),
+    DOPE_score = DOPE_score,
+    errors = list(D_error = D_res$error, O_error = O_res$error, P_error = P_res$error, E_error = E_res$error)
+  )
+  class(out) <- "dope_results"
+  out
+}
+
+# ===============================
+# Multi-trajectory wrapper
+# ===============================
+#' DOPE: Comprehensive pseudotime trajectory quality assessment for multiple trajectories
+#' @export
 compute_multi_DOPE <- function(expr_or_seurat,
                                pseudotime_list,
                                naive_markers,
@@ -74,7 +332,6 @@ compute_multi_DOPE <- function(expr_or_seurat,
                                min_remaining = 10,
                                min_fraction = 0.20,
                                min_genes_per_module = 3,
-                               tol = 1e-8,
                                plot_E = TRUE,
                                verbose = TRUE,
                                parallel = FALSE,
@@ -83,7 +340,8 @@ compute_multi_DOPE <- function(expr_or_seurat,
                                branch_include = NULL,
                                branch_exclude = NULL,
                                branch_min_cells = 10,
-                               drop_unused_levels = TRUE) {
+                               drop_unused_levels = TRUE,
+                               tol = 1e-8) {
 
   E_method   <- match.arg(E_method)
   id_type    <- match.arg(id_type)
@@ -131,14 +389,14 @@ compute_multi_DOPE <- function(expr_or_seurat,
         min_remaining = min_remaining,
         min_fraction = min_fraction,
         min_genes_per_module = min_genes_per_module,
-        tol = tol,
         plot_E = plot_E,
         verbose = verbose,
         trajectory = trajectory,
         branch_include = branch_include,
         branch_exclude = branch_exclude,
         branch_min_cells = branch_min_cells,
-        drop_unused_levels = drop_unused_levels
+        drop_unused_levels = drop_unused_levels,
+        tol = tol
       )
       res$trajectory_name <- trajectory_name
       res
@@ -159,16 +417,15 @@ compute_multi_DOPE <- function(expr_or_seurat,
   if (use_parallel) {
     cl <- parallel::makeCluster(n_cores)
     on.exit(parallel::stopCluster(cl), add = TRUE)
-    # export needed names + closures
     parallel::clusterExport(
       cl,
       varlist = c("compute_DOPE_single",
                   "metrics_D","metrics_O","metrics_P","metrics_E",
-                  ".get_expr",".per_cell_score",".align_to_cells","subset_by_clusters","%||%"),
+                  ".get_expr",".per_cell_score",".align_to_cells","subset_by_clusters","%||%", ".has_formal"),
       envir = environment()
     )
-    # also pass constants via clusterCall (Seurat may be needed inside)
-    parallel::clusterEvalQ(cl, { suppressWarnings({library(Seurat)}) })
+    # If you need packages on workers, load them here:
+    # parallel::clusterEvalQ(cl, { library(Seurat) })
 
     idxs <- seq_along(pseudotime_list)
     trajectory_results <- parallel::parLapply(
@@ -189,7 +446,7 @@ compute_multi_DOPE <- function(expr_or_seurat,
   valid_scores <- comparison_summary$DOPE_score[!is.na(comparison_summary$DOPE_score)]
   best_trajectory <- if (length(valid_scores) > 0) {
     comparison_summary$trajectory[which.max(comparison_summary$DOPE_score)]
-  } else NA
+  } else NA_character_
 
   multi_results <- list(
     results = trajectory_results,
@@ -201,7 +458,7 @@ compute_multi_DOPE <- function(expr_or_seurat,
       id_type = id_type,
       species = species,
       parallel = use_parallel,
-      n_cores = if (use_parallel) n_cores else NA,
+      n_cores = if (use_parallel) n_cores else NA_integer_,
       trajectory = trajectory,
       branch_include = branch_include,
       branch_exclude = branch_exclude,
@@ -221,274 +478,10 @@ compute_multi_DOPE <- function(expr_or_seurat,
   multi_results
 }
 
-# ---------- Helpers ----------
-`%||%` <- function(x, y) if (is.null(x) || (length(x) == 1 && is.na(x))) y else x
-
-.get_expr <- function(x, assay = NULL, slot = "data") {
-  if (inherits(x, "Seurat")) {
-    if (is.null(assay)) assay <- Seurat::DefaultAssay(x)
-    return(as.matrix(Seurat::GetAssayData(x, assay = assay, slot = slot)))
-  } else if (is.matrix(x) || inherits(x, "dgCMatrix")) {
-    return(as.matrix(x))
-  } else if (is.data.frame(x)) {
-    return(as.matrix(x))
-  } else {
-    stop("expr_or_seurat must be a matrix/data.frame/dgCMatrix or a Seurat object")
-  }
-}
-
-.per_cell_score <- function(expr_or_seurat, markers) {
-  expr <- if (is.matrix(expr_or_seurat) || inherits(expr_or_seurat, "dgCMatrix") || is.data.frame(expr_or_seurat)) {
-    as.matrix(expr_or_seurat)
-  } else {
-    .get_expr(expr_or_seurat)
-  }
-  genes <- intersect(markers, rownames(expr))
-  if (length(genes) == 0) {
-    warning("No markers found in expression matrix.")
-    return(rep(NA_real_, ncol(expr)))
-  }
-  colSums(expr[genes, , drop = FALSE]) / length(genes)
-}
-
-.align_to_cells <- function(x, target_cells, what = "vector") {
-  if (!is.null(names(x))) {
-    if (!all(target_cells %in% names(x))) {
-      stop("Named ", what, " is missing some cells present in the expression object.")
-    }
-    x[target_cells]
-  } else {
-    if (length(x) != length(target_cells)) {
-      stop("Length of ", what, " (", length(x), ") must match number of cells (", length(target_cells), "). ",
-           "Provide names(x) to align by cell names.")
-    }
-    x
-  }
-}
-
-#' Subset cells by clusters (Seurat or matrix only)
-#' @return list(obj, idx, cluster_labels)
-subset_by_clusters <- function(expr_or_seurat,
-                               clusters,
-                               include = NULL,
-                               exclude = NULL,
-                               min_cells = 1,
-                               drop_unused_levels = TRUE,
-                               assay = NULL) {
-  stopifnot(min_cells >= 0)
-  is_mat_like <- function(x) is.matrix(x) || inherits(x, "dgCMatrix") || is.data.frame(x)
-
-  get_cells <- function(x) {
-    if (inherits(x, "Seurat")) {
-      Seurat::Cells(x)
-    } else if (is_mat_like(x)) {
-      colnames(x)
-    } else {
-      stop("Unsupported class: ", paste(class(x), collapse = ", "),
-           ". Only Seurat or matrix/data.frame/dgCMatrix are supported.")
-    }
-  }
-
-  get_clusters <- function(x, clusters) {
-    n_cells <- length(get_cells(x))
-    if (inherits(x, "Seurat") && is.character(clusters) && length(clusters) == 1) {
-      if (!clusters %in% colnames(x[[]])) {
-        stop("Cluster column '", clusters, "' not found in Seurat meta.data.")
-      }
-      cl <- x[[clusters]][, 1, drop = TRUE]
-      names(cl) <- Seurat::Cells(x)
-    } else {
-      cl <- clusters
-      if (!is.null(names(cl))) {
-        cn <- get_cells(x)
-        if (!all(cn %in% names(cl))) stop("Named 'clusters' vector must contain all cell names.")
-        cl <- cl[cn]
-      } else if (length(cl) != n_cells) {
-        stop("Length of 'clusters' (", length(cl), ") must match number of cells (", n_cells, ").")
-      }
-    }
-    as.character(cl)
-  }
-
-  cells <- get_cells(expr_or_seurat)
-  clvec <- get_clusters(expr_or_seurat, clusters)
-  if (drop_unused_levels) clvec <- as.character(factor(clvec))
-
-  mask <- rep(TRUE, length(clvec))
-  if (!is.null(include)) mask <- clvec %in% include
-  if (!is.null(exclude)) mask <- mask & !(clvec %in% exclude)
-
-  idx <- which(mask)
-  if (length(idx) < min_cells) {
-    stop("Subsetting left ", length(idx), " cells (< min_cells = ", min_cells, "). ",
-         "Adjust 'include'/'exclude' or lower 'min_cells'.")
-  }
-  kept_labels <- clvec[idx]
-
-  if (inherits(expr_or_seurat, "Seurat")) {
-    obj_sub <- Seurat::subset(expr_or_seurat, cells = cells[idx])
-    if (!is.null(assay) && assay %in% names(obj_sub@assays)) {
-      Seurat::DefaultAssay(obj_sub) <- assay
-    }
-  } else if (is_mat_like(expr_or_seurat)) {
-    obj_sub <- as.matrix(expr_or_seurat)[, idx, drop = FALSE]
-  } else {
-    stop("Unsupported class after checks—this should not happen.")
-  }
-  list(obj = obj_sub, idx = idx, cluster_labels = kept_labels)
-}
-
-# ---------- Core single-trajectory ----------
-#' Compute DOPE for a single trajectory (linear or branched)
-#' @export
-compute_DOPE_single <- function(expr_or_seurat,
-                                pseudotime,
-                                naive_markers,
-                                terminal_markers,
-                                cluster_labels = NULL,
-                                naive_clusters = NULL,
-                                terminal_clusters = NULL,
-                                pathways = NULL,
-                                gene_sets = NULL,
-                                E_method = c("gmm", "clusters", "combined"),
-                                id_type = c("SYMBOL", "ENSEMBL", "ENTREZID"),
-                                species = "Homo sapiens",
-                                assay = NULL,
-                                slot = "data",
-                                min_remaining = 10,
-                                min_fraction = 0.20,
-                                min_genes_per_module = 3,
-                                tol = 1e-8,
-                                plot_E = TRUE,
-                                verbose = FALSE,
-                                trajectory = c("linear","branched"),
-                                branch_include = NULL,
-                                branch_exclude = NULL,
-                                branch_min_cells = 10,
-                                drop_unused_levels = TRUE) {
-  E_method   <- match.arg(E_method)
-  id_type    <- match.arg(id_type)
-  trajectory <- match.arg(trajectory)
-
-  expr <- .get_expr(expr_or_seurat, assay = assay, slot = slot)
-  cells_all <- if (inherits(expr_or_seurat, "Seurat")) Seurat::Cells(expr_or_seurat) else colnames(expr)
-
-  # align provided vectors to cell order
-  pseudotime <- .align_to_cells(pseudotime, cells_all, what = "pseudotime")
-  if (!is.null(cluster_labels)) {
-    if (!(inherits(expr_or_seurat, "Seurat") && is.character(cluster_labels) && length(cluster_labels) == 1)) {
-      cluster_labels <- .align_to_cells(cluster_labels, cells_all, what = "cluster_labels")
-    }
-  }
-
-  # branched: subset first
-  if (trajectory == "branched") {
-    if (is.null(cluster_labels)) {
-      stop("For trajectory='branched', provide 'cluster_labels' (Seurat meta column or per-cell vector).")
-    }
-    sub <- subset_by_clusters(
-      expr_or_seurat = expr_or_seurat,
-      clusters = cluster_labels,
-      include = branch_include,
-      exclude = branch_exclude,
-      min_cells = branch_min_cells,
-      drop_unused_levels = drop_unused_levels,
-      assay = assay
-    )
-    expr <- .get_expr(sub$obj, assay = assay, slot = slot)
-    kept_cells <- if (inherits(sub$obj, "Seurat")) Seurat::Cells(sub$obj) else colnames(expr)
-    pseudotime <- .align_to_cells(pseudotime, kept_cells, what = "pseudotime")
-    cluster_labels <- sub$cluster_labels
-  }
-
-  if (length(pseudotime) != ncol(expr)) {
-    stop("Length of pseudotime must match number of cells in expression data after alignment/subsetting.")
-  }
-  if (!is.null(cluster_labels) && length(cluster_labels) != ncol(expr)) {
-    stop("Length of cluster_labels must match number of cells in expression data after alignment/subsetting.")
-  }
-
-  # D metric
-  D_res <- tryCatch({
-    metrics_D(expr, naive_markers, terminal_markers, pseudotime)
-  }, error = function(e) {
-    if (verbose) message("D metric failed: ", e$message)
-    list(D_naive = NA_real_, D_term = NA_real_, error = e$message)
-  })
-
-  # marker scores (for E metric)
-  naive_scores <- .per_cell_score(expr, naive_markers)
-  term_scores  <- .per_cell_score(expr, terminal_markers)
-
-  # O metric
-  O_res <- tryCatch({
-    metrics_O(expr, naive_markers, terminal_markers, pseudotime, tol = tol)
-  }, error = function(e) {
-    if (verbose) message("O metric failed: ", e$message)
-    list(O = NA_real_, error = e$message)
-  })
-
-  # P metric
-  P_res <- tryCatch({
-    metrics_P(expr,
-              pseudotime,
-              pathways = pathways,
-              gene_sets = gene_sets,
-              naive_markers = naive_markers,
-              terminal_markers = terminal_markers,
-              id_type = id_type,
-              species = species,
-              assay = assay,
-              slot = slot,
-              min_remaining = min_remaining,
-              min_fraction = min_fraction,
-              min_genes_per_module = min_genes_per_module,
-              verbose = verbose)
-  }, error = function(e) {
-    if (verbose) message("P metric failed: ", e$message)
-    list(P = NA_real_, error = e$message)
-  })
-
-  # E metric
-  E_res <- tryCatch({
-    metrics_E(pseudotime,
-              cluster_labels = cluster_labels,
-              naive_marker_scores = naive_scores,
-              terminal_marker_scores = term_scores,
-              naive_clusters = naive_clusters,
-              terminal_clusters = terminal_clusters,
-              method = E_method,
-              plot = plot_E)
-  }, error = function(e) {
-    if (verbose) message("E metric failed: ", e$message)
-    list(E_naive = NA_real_, E_term = NA_real_, E_comp = NA_real_, error = e$message)
-  })
-
-  comp_vec <- c(
-    D_res$D_naive %||% NA_real_,
-    D_res$D_term  %||% NA_real_,
-    O_res$O       %||% NA_real_,
-    P_res$P       %||% NA_real_,
-    E_res$E_comp  %||% NA_real_
-  )
-  DOPE_score <- if (all(is.na(comp_vec))) NA_real_ else mean(comp_vec, na.rm = TRUE)
-
-  out <- list(
-    D = list(D_naive = D_res$D_naive %||% NA_real_, D_term = D_res$D_term %||% NA_real_),
-    O = list(O = O_res$O %||% NA_real_),
-    P = list(P = P_res$P %||% NA_real_),
-    E = list(E_naive = E_res$E_naive %||% NA_real_, E_term = E_res$E_term %||% NA_real_, E_comp = E_res$E_comp %||% NA_real_),
-    DOPE_score = DOPE_score,
-    errors = list(D_error = D_res$error, O_error = O_res$error, P_error = P_res$error, E_error = E_res$error)
-  )
-  class(out) <- "dope_results"
-  out
-}
-
-# ---------- Summary / Print / Plot ----------
+# ===============================
+# Comparison summary / printing / plotting
+# ===============================
 #' Create comparison summary across trajectories
-#' @param trajectory_results List of trajectory results from compute_DOPE_single
-#' @return data.frame
 #' @export
 create_comparison_summary <- function(trajectory_results) {
   if (length(trajectory_results) == 0) stop("trajectory_results cannot be empty")
@@ -571,8 +564,9 @@ summary.multi_dope_results <- function(object, ...) {
   cat("\nDetailed Comparison Table:\n")
   cat("=========================\n")
   display_cols <- c("trajectory","DOPE_score","DOPE_score_rank","D_term","O","P","E_comp")
+  display_cols <- display_cols[display_cols %in% names(object$comparison_summary)]
   display_data <- object$comparison_summary[, display_cols, drop = FALSE]
-  numeric_cols <- sapply(display_data, is.numeric)
+  numeric_cols <- vapply(display_data, is.numeric, logical(1))
   display_data[numeric_cols] <- lapply(display_data[numeric_cols], function(x) ifelse(is.na(x), "NA", sprintf("%.3f", x)))
   print(display_data, row.names = FALSE)
 
@@ -629,12 +623,14 @@ plot.multi_dope_results <- function(multi_dope_results,
     return(
       ggplot2::ggplot(heatmap_data, ggplot2::aes(x = metric, y = trajectory, fill = score)) +
         ggplot2::geom_tile(color = "white", size = 0.5) +
-        ggplot2::scale_fill_gradient2(low = "red", mid = "yellow", high = "green", midpoint = 0.5, name = "Score", na.value = "grey90") +
+        ggplot2::scale_fill_gradient2(low = "red", mid = "yellow", high = "green",
+                                      midpoint = 0.5, name = "Score", na.value = "grey90") +
         ggplot2::theme_minimal() +
         ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
                        plot.title = ggplot2::element_text(hjust = 0.5)) +
         ggplot2::labs(title = "DOPE Metrics Heatmap", x = "Metric", y = "Trajectory Method") +
-        ggplot2::geom_text(ggplot2::aes(label = sprintf("%.2f", score)), color = "black", size = 3)
+        ggplot2::geom_text(ggplot2::aes(label = ifelse(is.na(score), "NA", sprintf("%.2f", score))),
+                           color = "black", size = 3)
     )
   } else {
     stop("Plot type must be one of: 'bar', 'radar', or 'heatmap'")

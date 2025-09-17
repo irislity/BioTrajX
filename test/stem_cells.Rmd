@@ -1,0 +1,167 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+setwd("C:/Users/iris9/BioTrajX")
+devtools::load_all() 
+```
+
+```{r}
+seu <- readRDS("C:/Users/iris9/Desktop/bone_marrow_10X_pseudotime.rds")
+
+
+p <- DimPlot(seu, reduction="umap", group.by="Phenotype") +
+          DimPlot(res$obj, reduction="umap",group.by="Phenotype")
+
+p
+```
+```{r}
+library(dplyr)
+
+df <- seu@meta.data %>%
+  select(Phenotype, Ground_truth) %>%
+  filter(Ground_truth %in% c("4"))
+```
+
+1:
+Stem_Progenitors 
+
+2:
+[1] "Monocyte_progenitors"      "Granulocyte_progenitors"   "Immature_B"               
+[4] "Megakaryocyte_progenitors"
+
+3:
+[1] "Monocytes"                           "Granulocytes"                       
+[3] "Erythroid_progenitors_Erythroblasts" "Mature_B" 
+
+4:
+[1] "Macrophages"  "Erythrocytes"
+
+
+
+```{r}
+res <- subset_by_clusters(seu, clusters = "Phenotype",
+                          include = c("Stem_Progenitors","Megakaryocyte_progenitors", "Erythroid_progenitors_Erythroblasts", "Erythrocytes"))
+```
+
+
+
+```{r}
+pseudotime_methods <- list(
+  "monocle3" = res$obj$monocle3_pseudotime,
+  "slingshot" = res$obj$slingshot_pt_single, 
+  "CytoTRACE" = res$obj$CytoTRACE
+)
+
+
+
+# Stem / progenitor markers
+stem_progenitor_genes <- c(
+  "Cd34",
+  "Kit",        # c-Kit
+  "Flt3",
+  "Prom1",      # CD133
+  "Thy1",       # CD90
+  "Hoxb4",
+  "Gata2",
+  "Runx1",
+  "Tal1",
+  "Mecom"       # aka Evi1
+)
+
+# Erythrocyte / erythroid markers
+erythrocyte_genes <- c(
+  "Gypa",       # Glycophorin A
+  "Hbb-bs",     # Hemoglobin, beta, adult minor chain
+  "Hbb-bt",     # Hemoglobin, beta, major chain
+  "Hba-a1",     # Hemoglobin alpha, adult
+  "Hba-a2",     # Hemoglobin alpha, adult
+  "Tfrc",       # CD71, transferrin receptor
+  "Klf1",       # Erythroid transcription factor
+  "Alas2",      # Heme biosynthesis
+  "Epor",       # Erythropoietin receptor
+  "Gata1"       # Master erythroid TF
+)
+expr <- as.matrix(GetAssayData(res$obj, layer = "data"))
+
+# Compare all methods
+results <- compute_multi_DOPE(
+  expr = expr,
+  pseudotime_list = pseudotime_methods,
+  naive_markers = stem_progenitor_genes ,
+  species = "Mus musculus",
+  tol = 0.01,
+  terminal_markers = erythrocyte_genes,
+  pathways = c("mmu04640" ),
+  E_method = "gmm", plot_E = T
+)
+
+
+
+plot.multi_dope_results (results, type = "bar")
+
+plot.multi_dope_results (results, type = "radar")
+```
+
+```{r}
+pseudotime_methods <- list(
+  "monocle3" = seu$monocle3_pseudotime,
+  "slingshot" = seu$slingshot_pt_single, 
+  "CytoTRACE" = seu$CytoTRACE
+)
+
+results <- compute_multi_DOPE(
+  expr = seu,
+  pseudotime_list = pseudotime_methods,
+  naive_markers = stem_progenitor_genes ,
+  species = "Mus musculus",
+  id_type = "SYMBOL",
+  terminal_markers = erythrocyte_genes,
+  pathways = c("mmu04640"),
+  E_method = "gmm", plot_E = T
+)
+
+plot.multi_dope_results (results, type = "bar")
+
+plot.multi_dope_results (results, type = "radar")
+```
+
+
+```{r}
+branches <- c("Stem_to_Ery","Stem_to_B")
+naive_markers_list <- list(
+ Stem_to_Ery = stem_progenitor_genes,
+ Stem_to_B = stem_progenitor_genes)
+
+terminal_markers_list <- list(
+ Stem_to_Ery = erythrocyte_genes,
+ Stem_to_B = c("Cd19","Cd79a","Cd79b","Ms4a1","Cd22","Cr2","Fcer2a","Pax5","Ebf1","Irf4"))
+
+pathways_list <- list(
+   Stem_to_Ery = c("mmu04640"),
+   Stem_to_B = c("mmu04662")
+)
+
+branch_filters <- list(
+ Stem_to_Ery = list(include = c("Stem_Progenitors","Megakaryocyte_progenitors", "Erythroid_progenitors_Erythroblasts", "Erythrocytes"), min_cells = 50),
+  Stem_to_B = list(include = c("Stem_Progenitors","Immature_B", "Mature_B"), min_cells = 50))
+
+res_multi <- compute_multi_DOPE_branched(
+  expr_or_seurat = seu,
+  pseudotime_list = pseudotime_methods,
+  naive_markers_list = naive_markers_list,
+  terminal_markers_list = terminal_markers_list,
+  pathways_list = pathways_list,
+  cluster_labels = "Phenotype",
+  branch_filters = branch_filters,
+  id_type = "SYMBOL",
+  species = "Mus musculus",
+  verbose = TRUE
+)
+```
+```{r}
+plot.multi_dope_results (res_multi, type="bar")
+```
+

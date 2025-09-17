@@ -4,7 +4,6 @@
 #' @param naive_markers character vector of naive/root marker gene names.
 #' @param terminal_markers character vector of terminal marker gene names.
 #' @param pseudotime numeric vector of length ncol(expr); not necessarily scaled.
-#' @param tol numeric tolerance to treat a change as a tie (default 1e-8).
 #'
 #' @return A list with:
 #'   \item{O}{scalar order-consistency score in [0,1]}
@@ -13,73 +12,99 @@
 #'   \item{n_cells}{number of cells}
 #'   \item{n_genes}{number of genes used}
 #' @export
+
 metrics_O <- function(expr,
                       naive_markers,
                       terminal_markers,
                       pseudotime,
-                      tol = 1e-8) {
+                      iqr_quantile = 0.5,
+                      orientation_max = TRUE) {
 
+  # --- basic checks
   stopifnot(is.matrix(expr) || inherits(expr, "Matrix"))
   stopifnot(is.numeric(pseudotime), length(pseudotime) == ncol(expr))
-
-  # helper: map expected direction per gene (-1 for naive, +1 for terminal)
-  make_delta <- function(naive_markers, terminal_markers) {
-    c(
-      stats::setNames(rep(-1, length(naive_markers)),   naive_markers),
-      stats::setNames(rep(+1, length(terminal_markers)), terminal_markers)
-    )
+  if (!is.numeric(iqr_quantile) || length(iqr_quantile) != 1L || iqr_quantile < 0 || iqr_quantile > 1) {
+    stop("iqr_quantile must be a number in [0,1].")
   }
 
-  delta_all <- make_delta(naive_markers, terminal_markers)
-
-  # Intersect with available genes and align
-  genes <- intersect(names(delta_all), rownames(expr))
-  if (length(genes) == 0L) {
-    warning("No overlap between provided markers and rownames(expr). Returning NA.")
-    return(list(
-      O = NA_real_, O_f = setNames(numeric(0), character(0)),
-      genes_used = character(0), n_cells = ncol(expr), n_genes = 0L
-    ))
-  }
-  dlt <- delta_all[genes]
-
-  # Sort cells by pseudotime
-  ord   <- order(pseudotime)
-  t_ord <- as.numeric(pseudotime[ord])
-  N     <- length(t_ord)
-  if (N < 2L) {
-    warning("Need at least 2 cells to compute adjacent-step concordance. Returning NA.")
-    return(list(
-      O = NA_real_, O_f = setNames(numeric(0), character(0)),
-      genes_used = genes, n_cells = N, n_genes = length(genes)
-    ))
-  }
-
-  # Reorder expression by pseudotime (genes x cells)
-  X_ord <- expr[genes, ord, drop = FALSE]
-
-  # Adjacent differences along pseudotime for each gene (genes x (N-1))
-  dx_adj <- X_ord[, -1, drop = FALSE] - X_ord[, -ncol(X_ord), drop = FALSE]
-
-  # Apply expected sign per gene: positive means concordant with biological order
-  dx_signed <- sweep(dx_adj, 1, dlt, `*`)
-
-  # Concordant (> tol), ties (<= tol in magnitude)
-  concord <- dx_signed > tol
-  ties    <- abs(dx_adj) <= tol
-
-  # Per-gene O: fraction of concordant steps + 0.5 * ties
-  O_f <- (rowSums(concord) + 0.5 * rowSums(ties)) / (ncol(X_ord) - 1)
-  names(O_f) <- rownames(X_ord)
-
-  # Aggregate O across genes
-  O <- mean(O_f, na.rm = TRUE)
-
-  list(
-    O = O,
-    O_f = O_f,
-    genes_used = genes,
-    n_cells = N,
-    n_genes = length(genes)
+  # expected sign per gene
+  delta_all <- c(
+    stats::setNames(rep(-1L, length(naive_markers)),    naive_markers),
+    stats::setNames(rep(+1L, length(terminal_markers)), terminal_markers)
   )
+
+  # de-dup rownames
+  rn <- rownames(expr)
+  if (anyDuplicated(rn)) {
+    keep <- !duplicated(rn)
+    expr <- expr[keep, , drop = FALSE]
+  }
+
+  genes_all <- intersect(names(delta_all), rownames(expr))
+  if (!length(genes_all)) {
+    warning("No overlap between markers and expr rownames.")
+    return(list(O = NA_real_, O_f = setNames(numeric(0), character(0)),
+                genes_used = character(0), n_cells = ncol(expr), n_genes = 0L))
+  }
+
+  # per-gene isotonic R^2 in expected direction
+  O_once <- function(t) {
+    ord <- order(t)
+    X   <- as.matrix(expr[genes_all, ord, drop = FALSE])
+    t   <- as.numeric(t[ord])
+    N   <- ncol(X)
+    if (N < 3L) {
+      return(list(O = NA_real_, O_f = setNames(numeric(0), character(0)),
+                  genes_used = character(0), n_cells = N, n_genes = 0L))
+    }
+
+    # IQR filter
+    iqr_vals <- apply(X, 1L, stats::IQR)
+    thr <- stats::quantile(iqr_vals, probs = iqr_quantile, na.rm = TRUE, names = FALSE)
+    keep <- iqr_vals >= thr
+    if (!any(keep)) {
+      return(list(O = NA_real_, O_f = setNames(numeric(0), character(0)),
+                  genes_used = character(0), n_cells = N, n_genes = 0L))
+    }
+    X   <- X[keep, , drop = FALSE]
+    dlt <- delta_all[rownames(X)]  # scalar per row after subsetting
+
+    # isotonic with direction constraint (expects scalar delta)
+    iso_R2_dir <- function(y, x, delta_scalar) {
+      # enforce expected direction
+      yy  <- if (delta_scalar > 0) y else -y
+      fit <- stats::isoreg(x, yy)
+      # interpolate fitted values to original x
+      yhat <- stats::approx(fit$x, fit$yf, xout = x, ties = "ordered")$y
+      if (delta_scalar < 0) yhat <- -yhat
+      ss_tot <- sum((y - mean(y))^2)
+      if (ss_tot <= .Machine$double.eps) return(0)
+      r2 <- 1 - sum((y - yhat)^2) / ss_tot
+      max(0, min(1, r2))
+    }
+
+    # compute per-gene R^2, matching the scalar delta for each row
+    Of <- vapply(seq_len(nrow(X)), function(i) {
+      iso_R2_dir(y = X[i, ], x = t, delta_scalar = dlt[i])
+    }, numeric(1))
+    names(Of) <- rownames(X)
+
+    list(O = mean(Of, na.rm = TRUE),
+         O_f = Of,
+         genes_used = names(Of),
+         n_cells = N,
+         n_genes = length(Of))
+  }
+
+  res_pos <- O_once(pseudotime)
+  if (isTRUE(orientation_max)) {
+    res_neg <- O_once(-pseudotime)
+    if (is.na(res_pos$O) || (!is.na(res_neg$O) && res_neg$O > res_pos$O)) {
+      res_neg$orientation <- "-"
+      return(res_neg)
+    }
+  }
+  res_pos$orientation <- "+"
+  res_pos
 }
+
