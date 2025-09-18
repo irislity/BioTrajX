@@ -543,3 +543,141 @@ summary.endpoints_validity <- function(object, ...) {
 #
 # print(result_gmm)
 # summary(result_clusters)
+
+
+
+#' Plot precision@k curves for Endpoints Validity (E)
+#'
+#' @param E_obj An object returned by metrics_E() (class "endpoints_validity")
+#' @param overlay Logical; if TRUE, plot Naive & Terminal on one axis; else 2 panels
+#' @param main Global title
+#' @param col_naive,col_term Colors for curves/points
+#' @param lwd Line width for curves
+#' @param point_cex Size for the marker at k = #positives
+#' @param point_alpha Transparency for the scatter rug (optional visual cue)
+#' @param show_rug Logical; draw a small rug showing positive positions along the ranked list
+#'
+#' @details
+#' For each label vector y in {0,1}, ordered by the appropriate direction of pseudotime,
+#' we compute precision@k = (# positives in top k) / k for k = 1..N.
+#' The plotted dot highlights precision at k = number of positives (which is what E uses).
+#'
+#' @export
+plot_metrics_E <- function(E_obj,
+                           overlay      = TRUE,
+                           main         = "Endpoints Validity: precision",
+                           col_naive    = "#1f77b4",
+                           col_term     = "#d62728",
+                           lwd          = 2,
+                           point_cex    = 1.1,
+                           point_alpha  = 0.7,
+                           show_rug     = TRUE) {
+  stopifnot(inherits(E_obj, "endpoints_validity"))
+
+  t <- E_obj$pseudotime
+  yN <- E_obj$naive_labels
+  yT <- E_obj$terminal_labels
+
+  # helper: compute precision@k curve given ordering direction
+  precision_curve <- function(t, y, decreasing = FALSE) {
+    ok <- is.finite(t) & !is.na(y)
+    if (!any(ok)) return(list(k = integer(0), prec = numeric(0),
+                              k_star = NA_integer_, prec_star = NA_real_,
+                              p_base = NA_real_, ranks_pos = integer(0)))
+    t  <- t[ok]; y <- as.integer(y[ok])
+    ord <- order(t, decreasing = decreasing)
+    y_o <- y[ord]
+    cpos <- cumsum(y_o == 1L)
+    kvec <- seq_along(y_o)
+    prec <- cpos / kvec
+
+    k_star <- sum(y_o == 1L)                      # number of positives
+    prec_star <- if (k_star > 0L) mean(y_o[seq_len(k_star)] == 1L) else NA_real_
+    p_base <- mean(y_o == 1L)                     # random baseline
+    ranks_pos <- which(y_o == 1L)                 # positions of positives
+
+    list(k = kvec, prec = prec,
+         k_star = k_star, prec_star = prec_star,
+         p_base = p_base, ranks_pos = ranks_pos)
+  }
+
+  # compute curves
+  curN <- if (!is.null(yN)) precision_curve(t, yN, decreasing = FALSE) else NULL
+  curT <- if (!is.null(yT)) precision_curve(t, yT, decreasing = TRUE)  else NULL
+
+  # alpha helper (for rug color)
+  ac <- function(col, alpha) grDevices::adjustcolor(col, alpha.f = alpha)
+
+  old_par <- par(no.readonly = TRUE); on.exit(par(old_par), add = TRUE)
+  if (overlay) {
+    par(mfrow = c(1, 1), oma = c(0, 0, 2, 0))
+
+    # set up empty plot bounds
+    xmax <- max(c(curN$k, curT$k), na.rm = TRUE)
+    ymax <- max(c(curN$prec, curT$prec, curN$p_base, curT$p_base), na.rm = TRUE)
+    if (!is.finite(xmax)) { plot.new(); mtext(main, outer = TRUE); return(invisible(NULL)) }
+
+    plot(NA, NA, xlim = c(1, xmax), ylim = c(0, ymax),
+         xlab = "k (top-k cells by direction)", ylab = "precision@k",
+         main = "Precision@k (overlay)")
+
+    # baselines
+    if (!is.null(curN) && is.finite(curN$p_base)) abline(h = curN$p_base, col = ac(col_naive, 0.5), lty = 3)
+    if (!is.null(curT) && is.finite(curT$p_base)) abline(h = curT$p_base, col = ac(col_term, 0.5),  lty = 3)
+
+    # curves
+    if (!is.null(curN) && length(curN$k)) {
+      lines(curN$k, curN$prec, col = col_naive, lwd = lwd)
+      if (isTRUE(show_rug) && length(curN$ranks_pos)) rug(curN$ranks_pos, col = ac(col_naive, point_alpha))
+      if (is.finite(curN$k_star) && curN$k_star > 0L) {
+        points(curN$k_star, curN$prec_star, pch = 19, cex = point_cex, col = col_naive)
+      }
+    }
+    if (!is.null(curT) && length(curT$k)) {
+      lines(curT$k, curT$prec, col = col_term, lwd = lwd)
+      if (isTRUE(show_rug) && length(curT$ranks_pos)) rug(curT$ranks_pos, col = ac(col_term, point_alpha), side = 1)
+      if (is.finite(curT$k_star) && curT$k_star > 0L) {
+        points(curT$k_star, curT$prec_star, pch = 19, cex = point_cex, col = col_term)
+      }
+    }
+
+    legend("bottomright",
+           legend = c(
+             sprintf("Naïve:  E_naive = %.3f  (p=%.2f)", E_obj$E_naive, ifelse(is.null(curN), NA, curN$p_base)),
+             sprintf("Terminal: E_term  = %.3f  (p=%.2f)", E_obj$E_term, ifelse(is.null(curT), NA, curT$p_base)),
+             if (!is.na(E_obj$E_comp)) sprintf("E_comp = %.3f", E_obj$E_comp) else NULL
+           ),
+           col = c(col_naive, col_term, "black")[seq_len(2 + !is.na(E_obj$E_comp))],
+           lwd = c(lwd, lwd, NA)[seq_len(2 + !is.na(E_obj$E_comp))],
+           pch = c(19, 19, NA)[seq_len(2 + !is.na(E_obj$E_comp))],
+           bty = "n", cex = 0.9)
+
+    mtext(main, outer = TRUE, cex = 1.2, line = 0)
+
+  } else {
+    par(mfrow = c(1, 2), oma = c(0, 0, 2, 0))
+
+    # panel helper
+    panel_plot <- function(cur, title, col_line) {
+      if (is.null(cur) || !length(cur$k)) {
+        plot.new(); title(main = paste0(title, " (no labels)")); return(invisible(NULL))
+      }
+      plot(cur$k, cur$prec, type = "l", col = col_line, lwd = lwd,
+           xlab = "k (top-k cells)", ylab = "precision@k", main = title,
+           ylim = c(0, max(cur$prec, cur$p_base, na.rm = TRUE)))
+      abline(h = cur$p_base, col = ac(col_line, 0.5), lty = 3)
+      if (isTRUE(show_rug) && length(cur$ranks_pos)) rug(cur$ranks_pos, col = ac(col_line, point_alpha))
+      if (is.finite(cur$k_star) && cur$k_star > 0L) {
+        points(cur$k_star, cur$prec_star, pch = 19, cex = point_cex, col = col_line)
+      }
+    }
+
+    panel_plot(curN, sprintf("Naïve (E=%.3f)", E_obj$E_naive), col_naive)
+    panel_plot(curT, sprintf("Terminal (E=%.3f)", E_obj$E_term), col_term)
+
+    mtext(main, outer = TRUE, cex = 1.2, line = 0)
+  }
+
+  invisible(NULL)
+}
+

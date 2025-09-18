@@ -352,6 +352,10 @@ plot_metrics_P <- function(expr_or_seurat,
                          " (R^2=", sprintf("%.2f", R2[top_mods]), ")"),
          col = cols[seq_along(top_mods)], lwd = 2, cex = 0.8, bty = "n")
 
+  legend("topright",
+         legend = sprintf("P = %.3f", mean(R2, na.rm = TRUE)),
+         bty = "n")
+
   ## Global title
   mtext(main, outer = TRUE, cex = 1.2, line = 0)
 }
