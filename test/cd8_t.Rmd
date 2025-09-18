@@ -1,0 +1,31 @@
+---
+title: "R Notebook"
+---
+
+```{r}
+setwd("C:/Users/iris9/BioTrajX")
+devtools::load_all() 
+```
+
+```{r}
+library(Seurat)
+seu <- readRDS("C:/Users/iris9/Desktop/GSE164690.all.CD8posT.wScores_pseudotime.rds")
+expr <- as.matrix(GetAssayData(seu, layer = "data"))
+t<- seu$monocle3_pseudotime
+naive<- c("CCR7","TCF7","IL7R")
+term<- c('PDCD1','LAG3','HAVCR2','TOX','TIGIT','CTLA4','CXCL13','ENTPD1','ITGAE')
+cluster <- seu$functional.cluster
+
+```
+
+```{r}
+D <- metrics_D(expr, naive_markers = naive, terminal_markers = term, seu$monocle3_pseudotime)
+
+
+plot_metrics_D_reg(seu$monocle3_pseudotime,D)
+```
+```{r}
+
+```
+
+
