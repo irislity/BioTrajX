@@ -8,14 +8,16 @@ devtools::load_all()
 ```
 
 ```{r}
+library(Seurat)
 seu <- readRDS("C:/Users/iris9/Desktop/bone_marrow_10X_pseudotime.rds")
 
 
-p <- DimPlot(seu, reduction="umap", group.by="Phenotype") +
-          DimPlot(res$obj, reduction="umap",group.by="Phenotype")
+p <- DimPlot(seu, reduction="umap", group.by="Phenotype")
 
 p
 ```
+
+
 ```{r}
 library(dplyr)
 
@@ -43,19 +45,18 @@ Stem_Progenitors
 ```{r}
 res <- subset_by_clusters(seu, clusters = "Phenotype",
                           include = c("Stem_Progenitors","Megakaryocyte_progenitors", "Erythroid_progenitors_Erythroblasts", "Erythrocytes"))
-```
 
-
-
-```{r}
 pseudotime_methods <- list(
   "monocle3" = res$obj$monocle3_pseudotime,
   "slingshot" = res$obj$slingshot_pt_single, 
   "CytoTRACE" = res$obj$CytoTRACE
 )
 
+```
 
 
+
+```{r}
 # Stem / progenitor markers
 stem_progenitor_genes <- c(
   "Cd34",
@@ -83,7 +84,14 @@ erythrocyte_genes <- c(
   "Epor",       # Erythropoietin receptor
   "Gata1"       # Master erythroid TF
 )
-expr <- as.matrix(GetAssayData(res$obj, layer = "data"))
+
+pseudotime_methods <- list(
+  "monocle3" = seu$monocle3_pseudotime,
+  "slingshot" = seu$slingshot_pt_single, 
+  "CytoTRACE" = seu$CytoTRACE
+)
+
+expr <- as.matrix(GetAssayData(seu, layer = "data"))
 
 # Compare all methods
 results <- compute_multi_DOPE(
@@ -105,12 +113,6 @@ plot.multi_dope_results (results, type = "radar")
 ```
 
 ```{r}
-pseudotime_methods <- list(
-  "monocle3" = seu$monocle3_pseudotime,
-  "slingshot" = seu$slingshot_pt_single, 
-  "CytoTRACE" = seu$CytoTRACE
-)
-
 results <- compute_multi_DOPE(
   expr = seu,
   pseudotime_list = pseudotime_methods,
@@ -125,6 +127,8 @@ results <- compute_multi_DOPE(
 plot.multi_dope_results (results, type = "bar")
 
 plot.multi_dope_results (results, type = "radar")
+
+plot.multi_dope_results(results, type = "heatmap")
 ```
 
 

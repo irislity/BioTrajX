@@ -76,9 +76,11 @@ compute_DOPE_single_branched <- function(expr_or_seurat,
   E_method <- match.arg(E_method)
   id_type  <- match.arg(id_type)
 
-  # Branch sanity
+  # ---- Branch sanity ----
   branch_names <- union(names(naive_markers_list), names(terminal_markers_list))
-  if (is.null(branch_names) || any(branch_names == "")) stop("Branch lists must be named.")
+  if (is.null(branch_names) || any(branch_names == "")) {
+    stop("Branch lists must be named.")
+  }
   .stop_if_missing(naive_markers_list,    branch_names, "naive_markers_list")
   .stop_if_missing(terminal_markers_list, branch_names, "terminal_markers_list")
   if (!is.null(pathways_list))  .stop_if_missing(pathways_list,  branch_names, "pathways_list")
@@ -88,7 +90,7 @@ compute_DOPE_single_branched <- function(expr_or_seurat,
     warning("Both pathways_list and gene_sets_list provided; gene_sets_list will take precedence for P metric.")
   }
 
-  # Expression extraction
+  # ---- Expression extraction ----
   is_seurat <- inherits(expr_or_seurat, "Seurat")
   if (is_seurat) {
     if (!requireNamespace("Seurat", quietly = TRUE))
@@ -100,13 +102,17 @@ compute_DOPE_single_branched <- function(expr_or_seurat,
     expr <- as.matrix(expr_or_seurat)
     cells_all <- colnames(expr)
   }
-  if (is.null(cells_all) || length(cells_all) == 0) stop("No column (cell) names found in expression matrix.")
+  if (is.null(cells_all) || length(cells_all) == 0)
+    stop("No column (cell) names found in expression matrix.")
 
-  # Align helper
+  # ---- Align helpers ----
   .align_to_cells <- function(x, target_cells, what="vector") {
     if (!is.null(names(x))) {
       miss <- setdiff(target_cells, names(x))
-      if (length(miss)) stop("Named ", what, " missing cells: ", paste(head(miss, 5), collapse = ", "), if (length(miss) > 5) " ...")
+      if (length(miss)) {
+        stop("Named ", what, " missing cells: ", paste(head(miss, 5), collapse = ", "),
+             if (length(miss) > 5) " ...")
+      }
       x[target_cells]
     } else {
       if (length(x) != length(target_cells))
@@ -130,6 +136,7 @@ compute_DOPE_single_branched <- function(expr_or_seurat,
     cl_all <- NULL
   }
 
+  # ---- Branch subsetting ----
   subset_for_branch <- function(include=NULL, exclude=NULL, min_cells=10, drop_unused_levels=TRUE) {
     mask <- rep(TRUE, length(cells_all))
     if (!is.null(cl_all)) {
@@ -148,10 +155,10 @@ compute_DOPE_single_branched <- function(expr_or_seurat,
     )
   }
 
-  # --- Per-branch compute ---
+  # ---- Per-branch compute ----
   run_branch <- function(b) {
     if (isTRUE(verbose)) message(">>> Branch: ", b)
-    filt   <- branch_filters[[b]] %||% list()
+    filt    <- branch_filters[[b]] %||% list()
     include <- filt$include %||% NULL
     exclude <- filt$exclude %||% NULL
     minc    <- filt$min_cells %||% 10
@@ -164,12 +171,12 @@ compute_DOPE_single_branched <- function(expr_or_seurat,
     gene_sets        <- if (!is.null(gene_sets_list))  gene_sets_list[[b]]  else NULL
     pathways         <- if (!is.null(pathways_list))   pathways_list[[b]]   else NULL
 
-    # D
+    # ---- D ----
     D_res <- tryCatch({
       metrics_D(sub$expr, naive_markers, terminal_markers, sub$pt)
     }, error = function(e) list(D_naive=NA_real_, D_term=NA_real_, error=e$message))
 
-    # O (tol passed only if supported)
+    # ---- O ----
     O_res <- tryCatch({
       if (.has_formal(metrics_O, "tol")) {
         metrics_O(sub$expr, naive_markers, terminal_markers, sub$pt, tol = tol)
@@ -178,7 +185,7 @@ compute_DOPE_single_branched <- function(expr_or_seurat,
       }
     }, error = function(e) list(O=NA_real_, error=e$message))
 
-    # P (gene_sets wins if both given)
+    # ---- P (gene_sets wins) ----
     P_res <- tryCatch({
       metrics_P(
         sub$expr, sub$pt,
@@ -196,9 +203,13 @@ compute_DOPE_single_branched <- function(expr_or_seurat,
       )
     }, error = function(e) list(P=NA_real_, error=e$message))
 
-    # E
-    naive_scores <- colMeans(sub$expr[intersect(naive_markers, rownames(sub$expr)), , drop=FALSE])
-    term_scores  <- colMeans(sub$expr[intersect(terminal_markers, rownames(sub$expr)), , drop=FALSE])
+    # ---- E ----
+    # robust colMeans: handle empty overlaps to avoid numeric(0)
+    n_idx <- intersect(naive_markers, rownames(sub$expr))
+    t_idx <- intersect(terminal_markers, rownames(sub$expr))
+    naive_scores <- if (length(n_idx)) colMeans(sub$expr[n_idx, , drop=FALSE]) else rep(NA_real_, ncol(sub$expr))
+    term_scores  <- if (length(t_idx)) colMeans(sub$expr[t_idx, , drop=FALSE]) else rep(NA_real_, ncol(sub$expr))
+
     E_res <- tryCatch({
       metrics_E(
         sub$pt,
@@ -206,10 +217,11 @@ compute_DOPE_single_branched <- function(expr_or_seurat,
         naive_marker_scores = naive_scores,
         terminal_marker_scores = term_scores,
         naive_clusters = NULL, terminal_clusters = NULL,
-        method = E_method, plot = FALSE
+        method = E_method, plot = isTRUE(plot_E)
       )
     }, error = function(e) list(E_naive=NA_real_, E_term=NA_real_, E_comp=NA_real_, error=e$message))
 
+    # ---- Aggregate per-branch score ----
     comp_vec <- c(D_res$D_naive %||% NA_real_,
                   D_res$D_term  %||% NA_real_,
                   O_res$O       %||% NA_real_,
@@ -217,32 +229,36 @@ compute_DOPE_single_branched <- function(expr_or_seurat,
                   E_res$E_comp  %||% NA_real_)
     score <- if (all(is.na(comp_vec))) NA_real_ else mean(comp_vec, na.rm = TRUE)
 
-    structure(list(
-      class = "dope_results",
+    # Branch payload
+    list(
       branch = b,
       n_cells = ncol(sub$expr),
       D = D_res, O = O_res, P = P_res, E = E_res,
-      DOPE_score = score
-    ), class = "dope_results")
+      DOPE_score = score,
+      cells = sub$cells
+    )
   }
 
   branch_results <- lapply(branch_names, run_branch)
   names(branch_results) <- branch_names
 
-  # Aggregate (weighted by cells)
+  # ---- Overall aggregate (weighted by branch cell count) ----
   w <- vapply(branch_results, function(x) x$n_cells, numeric(1))
   s <- vapply(branch_results, function(x) x$DOPE_score, numeric(1))
   agg <- if (all(is.na(s))) NA_real_ else stats::weighted.mean(s, w, na.rm = TRUE)
 
+  # ---- Return structure expected by the multi-trajectory wrapper ----
   list(
-    branches = branch_results,
-    aggregate_DOPE = agg,
-    weights = w,
+    branches = branch_results,            # each [[b]] has $DOPE_score
+    aggregate_DOPE = agg,                 # overall
+    weights = w,                          # branch cell counts
+    n_cells_total = sum(w),
     params = list(E_method=E_method, id_type=id_type, species=species,
                   min_remaining=min_remaining, min_fraction=min_fraction,
                   min_genes_per_module=min_genes_per_module, tol=tol)
   )
 }
+
 
 # ---------- Multi-trajectory (branched) ----------
 #' Compute DOPE across multiple pseudotime trajectories with branches
@@ -267,6 +283,7 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
                                         verbose = TRUE,
                                         parallel = FALSE,
                                         n_cores = NULL) {
+
   E_method <- match.arg(E_method)
   id_type  <- match.arg(id_type)
 
@@ -301,49 +318,127 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
     out
   }
 
-  if (parallel && length(pseudotime_list) > 1 && requireNamespace("parallel", quietly = TRUE)) {
-    if (is.null(n_cores)) n_cores <- max(1, parallel::detectCores() - 1)
+  # --- Run (simple parallel optional) ---
+  if (isTRUE(parallel) && length(pseudotime_list) > 1 &&
+      requireNamespace("parallel", quietly = TRUE)) {
+    if (is.null(n_cores)) n_cores <- max(1L, parallel::detectCores() - 1L)
     cl <- parallel::makeCluster(n_cores)
     on.exit(parallel::stopCluster(cl), add = TRUE)
-
-    # Export up-to-date objects and functions
-    parallel::clusterExport(
-      cl,
-      varlist = c(
-        # current environment helpers
-        ".stop_if_missing", "%||%", ".has_formal", ".flatten_traj_result",
-        # core functions and external metric symbols
-        "compute_DOPE_single_branched", "metrics_D", "metrics_O", "metrics_P", "metrics_E"
-      ),
-      envir = environment()
+    res_list <- parallel::parLapply(
+      cl, seq_along(pseudotime_list),
+      function(i) {
+        name <- names(pseudotime_list)[i]
+        pt   <- pseudotime_list[[i]]
+        run_one(name, pt)  # NOTE: compute_DOPE_single_branched must be visible on workers
+      }
     )
-    # Load packages on workers if needed (uncomment as appropriate):
-    # parallel::clusterEvalQ(cl, { library(Seurat); library(Matrix) })
-
-    res_list <- parallel::parLapply(cl, seq_along(pseudotime_list), function(i) {
-      name <- names(pseudotime_list)[i]; pt <- pseudotime_list[[i]]
-      run_one(name, pt)
-    })
     names(res_list) <- names(pseudotime_list)
   } else {
     res_list <- Map(run_one, names(pseudotime_list), pseudotime_list)
     names(res_list) <- names(pseudotime_list)
   }
 
-  comp <- data.frame(
+  # --- Overall comparison ---
+  comparison_overall <- data.frame(
     trajectory = names(res_list),
-    aggregate_DOPE = vapply(res_list, function(x) x$aggregate_DOPE, numeric(1)),
+    aggregate_DOPE = vapply(res_list, function(x) {
+      if (!is.null(x$aggregate_DOPE)) as.numeric(x$aggregate_DOPE) else NA_real_
+    }, numeric(1)),
     stringsAsFactors = FALSE
   )
-  comp <- comp[order(comp$aggregate_DOPE, decreasing = TRUE, na.last = TRUE), , drop = FALSE]
-  best <- if (all(is.na(comp$aggregate_DOPE))) NA_character_ else comp$trajectory[1]
+  comparison_overall <- comparison_overall[order(comparison_overall$aggregate_DOPE,
+                                                 decreasing = TRUE, na.last = TRUE), , drop = FALSE]
+  best_overall <- if (all(is.na(comparison_overall$aggregate_DOPE))) NA_character_
+  else comparison_overall$trajectory[1]
 
-  list(
-    results = res_list,
-    comparison = comp,
-    best_trajectory = best,
-    args = list(E_method=E_method, id_type=id_type, species=species, parallel=parallel, n_cores=n_cores)
+  # --- Per-branch ranking via branches[[br]]$DOPE_score ---
+  all_branches <- sort(unique(unlist(lapply(res_list, function(x) names(x$branches)))))
+
+  branch_comparisons <- setNames(vector("list", length(all_branches)), all_branches)
+  best_per_branch <- vector("list", length(all_branches)); names(best_per_branch) <- all_branches
+  branch_data <- setNames(vector("list", length(all_branches)), all_branches)
+
+  for (br in all_branches) {
+    scores <- vapply(res_list, function(x) {
+      if (!is.null(x$branches) && !is.null(x$branches[[br]]) &&
+          !is.null(x$branches[[br]]$DOPE_score)) {
+        as.numeric(x$branches[[br]]$DOPE_score)
+      } else {
+        NA_real_
+      }
+    }, numeric(1))
+
+    df <- data.frame(
+      trajectory = names(res_list),
+      DOPE_score = scores,
+      stringsAsFactors = FALSE
+    )
+    df <- df[order(df$DOPE_score, decreasing = TRUE, na.last = TRUE), , drop = FALSE]
+    branch_comparisons[[br]] <- df
+
+    bt <- if (all(is.na(df$DOPE_score))) NA_character_ else df$trajectory[1]
+    bs <- if (is.na(bt)) NA_real_ else df$DOPE_score[1]
+    best_per_branch[[br]] <- data.frame(
+      branch = br, best_trajectory = bt, best_score = bs,
+      stringsAsFactors = FALSE
+    )
+
+    branch_data[[br]] <- lapply(res_list, function(x) {
+      if (!is.null(x$branches)) x$branches[[br]] else NULL
+    })
+    names(branch_data[[br]]) <- names(res_list)
+  }
+
+  best_per_branch <- do.call(rbind, best_per_branch)
+
+  comparison_by_branch <- do.call(
+    rbind,
+    lapply(all_branches, function(br) {
+      df <- branch_comparisons[[br]]
+      if (!nrow(df)) return(NULL)
+      data.frame(branch = br, df, row.names = NULL, stringsAsFactors = FALSE)
+    })
   )
+
+  res <- list(
+    results = res_list,
+    comparison_overall = comparison_overall,
+    best_overall = best_overall,
+    comparison_by_branch = comparison_by_branch,  # columns: branch, trajectory, DOPE_score
+    best_per_branch = best_per_branch,            # columns: branch, best_trajectory, best_score
+    branch_comparisons = branch_comparisons,      # per-branch sorted tables (DOPE_score)
+    branch_data = branch_data,                    # branch -> trajectory -> raw branch object
+    args = list(E_method=E_method, id_type=id_type, species=species,
+                parallel=parallel, n_cores=n_cores)
+  )
+
+  if (isTRUE(verbose)) {
+    cat("\n==========================================================\n")
+    cat("Multi-trajectory branched DOPE analysis complete!\n")
+    if (!is.na(res$best_overall)) {
+      bo <- res$comparison_overall$aggregate_DOPE[
+        res$comparison_overall$trajectory == res$best_overall
+      ]
+      cat(sprintf("Best overall trajectory: %s (DOPE: %.3f)\n", res$best_overall, bo))
+    } else {
+      cat("Best overall trajectory: NA (no valid scores)\n")
+    }
+    if (!is.null(res$best_per_branch) && nrow(res$best_per_branch)) {
+      cat("\nBest trajectory per branch:\n")
+      for (i in seq_len(nrow(res$best_per_branch))) {
+        br <- res$best_per_branch$branch[i]
+        bt <- res$best_per_branch$best_trajectory[i]
+        sc <- res$best_per_branch$best_score[i]
+        if (is.na(bt)) {
+          cat(sprintf("  - %s: NA (no valid scores)\n", br))
+        } else {
+          cat(sprintf("  - %s: %s (DOPE: %.3f)\n", br, bt, sc))
+        }
+      }
+    }
+  }
+
+  return(res)
 }
 
 # ---------- Summary / Print / Plot ----------
