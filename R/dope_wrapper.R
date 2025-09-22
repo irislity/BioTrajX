@@ -1,69 +1,118 @@
-#' DOPE: Comprehensive pseudotime trajectory quality assessment for multiple trajectories
+#' Compute DOPE metrics for a single trajectory (linear)
 #'
 #' @description
-#' Compute all four DOPE metrics (Directionality, Order, Program coherence, Endpoints validity)
-#' for multiple pseudotime trajectories in a single function call. This function loops through
-#' each provided pseudotime and computes DOPE metrics, allowing comparison across different
-#' trajectory inference methods or parameters. Supports linear or branched trajectories; for
-#' branched analyses, cells can be subset using cluster labels before metric computation.
+#' High-level convenience wrapper that computes the four DOPE components—
+#' Directionality (D), Order consistency (O), Program coherence (P), and
+#' Endpoints validity (E)—for a single trajectory. Works with either a
+#' **Seurat** object (pulling assay data via `GetAssayData`) or an expression
+#' matrix-like input (dense `matrix`, `dgCMatrix`, or `data.frame` with genes in
+#' rows and cells in columns). Optionally handles **branched** trajectories by
+#' subsetting a specified branch before scoring.
 #'
-#' @param expr_or_seurat Matrix (genes x cells) **or** a Seurat object containing expression data.
-#' @param pseudotime_list Named list of numeric vectors, where each vector contains pseudotime values
-#'                       for one trajectory method. Names will be used as trajectory identifiers.
-#'                       Each vector should have length = #cells and can be named by cell for alignment.
-#' @param naive_markers Character vector of naive/root marker gene names.
-#' @param terminal_markers Character vector of terminal marker gene names.
-#' @param cluster_labels Character scalar (Seurat meta column name) **or** per-cell vector of cluster labels.
-#' @param naive_clusters Character vector of cluster names considered as naive (for E metric).
-#' @param terminal_clusters Character vector of cluster names considered as terminal (for E metric).
-#' @param pathways Character vector of KEGG pathway queries for P metric (e.g., "hsa04660" or name fragments).
-#'                 Ignored if \code{gene_sets} is provided.
-#' @param gene_sets Optional named list of gene vectors for P metric (ID space given by \code{id_type}).
-#'                  If supplied, skips KEGG lookup.
-#' @param E_method Character, one of "gmm" (Case 1), "clusters" (Case 2), or "combined" (Case 3) for E metric.
-#' @param id_type One of "SYMBOL","ENSEMBL","ENTREZID" for P metric gene mapping. Default "SYMBOL".
-#' @param species Species label for msigdbr in P metric (default "Homo sapiens").
-#' @param assay,slot If a Seurat object is provided, which assay/slot to pull for P metric (default: current assay, slot "data").
-#' @param min_remaining,min_fraction,min_genes_per_module Parameters for P metric pathway filtering.
-#' @param plot_E Logical, whether to generate density plots for E metric GMM.
-#' @param verbose Logical; print progress messages.
-#' @param parallel Logical; whether to use parallel processing for multiple trajectories.
-#' @param n_cores Integer; number of cores to use if parallel=TRUE (default: detectCores()-1).
-#' @param trajectory One of c("linear","branched"). If "branched", will subset cells by clusters before metrics.
-#' @param branch_include Character vector of cluster names to keep (optional; branched mode).
-#' @param branch_exclude Character vector of cluster names to drop (optional; branched mode).
-#' @param branch_min_cells Integer; require at least this many cells after subsetting (default 10).
-#' @param drop_unused_levels Logical; drop unused factor levels in returned labels (default TRUE).
+#' @param expr_or_seurat A Seurat object, numeric matrix, `dgCMatrix`, or
+#'   `data.frame` of gene expression (genes x cells).
+#' @param pseudotime Numeric vector of length equal to the number of cells after
+#'   any subsetting; names should be cell IDs. If unnamed, it must be in the
+#'   same order as the columns of `expr_or_seurat`.
+#' @param naive_markers Character vector of gene symbols/IDs expected to be high
+#'   in the naïve/early state.
+#' @param terminal_markers Character vector of gene symbols/IDs expected to be
+#'   high in the terminal/late state.
+#' @param cluster_labels Either (i) a per-cell vector (same length/order as
+#'   cells) giving cluster/branch labels, or (ii) **for Seurat inputs only**, a
+#'   single character string giving the name of a metadata column to use.
+#' @param naive_clusters Character vector of cluster names defining naïve
+#'   clusters for `E` when `E_method %in% c("clusters","combined")`.
+#' @param terminal_clusters Character vector of cluster names defining terminal
+#'   clusters for `E` when `E_method %in% c("clusters","combined")`.
+#' @param pathways Optional pathway resource passed to `metrics_P()`; typically a
+#'   list or database handle understood by that function.
+#' @param gene_sets Optional named list of gene sets (each a character vector)
+#'   used by `metrics_P()` to compute program coherence.
+#' @param E_method One of `"gmm"`, `"clusters"`, or `"combined"`. Controls how
+#'   endpoint validity is estimated inside `metrics_E()`.
+#' @param id_type Identifier type for genes used in pathway/gene-set lookups;
+#'   one of `"SYMBOL"`, `"ENSEMBL"`, or `"ENTREZID"`. Default `"SYMBOL"`.
+#' @param species Species string for pathway/gene-set lookup (default
+#'   `"Homo sapiens"`).
+#' @param assay Assay name to pull from a Seurat object (defaults to
+#'   `Seurat::DefaultAssay(x)` when `NULL`).
+#' @param slot Slot to pull from a Seurat assay; typically `"data"` (default),
+#'   `"counts"`, or `"scale.data"`.
+#' @param min_remaining Minimum number of genes remaining in a module/gene set
+#'   after filtering inside `metrics_P()` (default `10`).
+#' @param min_fraction Minimum fraction of genes from a module that must remain
+#'   after filtering in `metrics_P()` (default `0.20`).
+#' @param min_genes_per_module Minimum size of a gene set/module considered by
+#'   `metrics_P()` (default `3`).
+#' @param plot_E Logical; if `TRUE`, allow `metrics_E()` to produce diagnostic
+#'   density plots when using the GMM mode (default `TRUE`).
+#' @param verbose Logical; if `TRUE`, print diagnostic messages when component
+#'   metrics fail and are caught (default `FALSE`).
+#' @param drop_unused_levels Logical; if `TRUE`, drop unused factor levels in
+#'   the subsetted cluster labels (default `TRUE`).
+#' @param tol Numeric tolerance forwarded to `metrics_O()` when that function
+#'   supports a `tol` argument (default `1e-8`).
 #'
-#' @return A list of class "multi_dope_results" containing:
-#' \item{results}{Named list where each element contains DOPE results for one trajectory}
-#' \item{comparison_summary}{Data frame comparing all trajectories across metrics}
-#' \item{best_trajectory}{Name of trajectory with highest composite DOPE score}
-#' \item{n_trajectories}{Number of trajectories analyzed}
-#' \item{method_info}{Analysis parameters used}
+#' @details
+#' The wrapper:
+#' \itemize{
+#'   \item Aligns `pseudotime` (and `cluster_labels` when provided) to the
+#'         current cell order.
+#'   \item Optionally subsets to a specified branch for `"branched"` trajectories.
+#'   \item Computes D via `metrics_D()`, O via `metrics_O()` (passing `tol`
+#'         when supported), P via `metrics_P()` (using `pathways`/`gene_sets`),
+#'         and E via `metrics_E()` (controlled by `E_method`, `plot_E`, and
+#'         optional cluster specification).
+#'   \item Aggregates a scalar `DOPE_score` as the mean of available component
+#'         scores (ignoring `NA`s).
+#' }
+#'
+#' Component failures are caught; the corresponding entry is set to `NA` and the
+#' error message is recorded under `errors`. Per-cell naïve/terminal scores used
+#' by `E` are computed internally as mean expression over the provided marker
+#' sets.
+#'
+#' @return An object of class `"dope_results"`, a list with elements:
+#' \describe{
+#'   \item{$D$}{List with `D_naive`, `D_term`.}
+#'   \item{$O$}{List with scalar `O`.}
+#'   \item{$P$}{List with scalar `P`.}
+#'   \item{$E$}{List with `E_naive`, `E_term`, and composite `E_comp`.}
+#'   \item{$DOPE_score$}{Scalar mean over available component scores.}
+#'   \item{$errors$}{List of caught error messages for D/O/P/E (may be `NULL`).}
+#' }
+#'
+#' @note
+#' This wrapper relies on the availability and behavior of the helper functions
+#' `metrics_D()`, `metrics_O()`, `metrics_P()`, and `metrics_E()`, as well as
+#' optional plotting utilities (e.g. `plot_metrics_*`). Ensure these are loaded
+#' in your package namespace. If working with Seurat inputs, the **Seurat**
+#' package must be installed and the requested assay/slot must exist.
+#'
+#' @seealso
+#' `metrics_D()`, `metrics_O()`, `metrics_P()`, `metrics_E()`,
+#' `subset_by_clusters()`
 #'
 #' @examples
-#' # pseudotime_methods <- list("monocle3" = mono_pt, "slingshot" = sling_pt)
-#' # multi_results <- compute_multi_DOPE(
-#' #   expr_or_seurat = seu,
-#' #   pseudotime_list = pseudotime_methods,
-#' #   naive_markers = c("TCF7","LEF1","CCR7"),
-#' #   terminal_markers = c("GZMB","PRF1","IFNG"),
-#' #   E_method = "gmm",
-#' #   trajectory = "branched",
-#' #   cluster_labels = "Phenotype",
-#' #   branch_include = c("Stem_Progenitors","Monocyte_progenitors","Monocytes")
-#' # )
+#' \dontrun{
+#'
+#' res <- compute_single_DOPE_linear(
+#'   expr_or_seurat   = expr,
+#'   pseudotime       = pt,
+#'   naive_markers    = naive,
+#'   terminal_markers = term,
+#'   E_method         = "gmm",
+#'   species          = "Homo sapiens"
+#' )
+#' str(res)
+#'
+#' }
 #'
 #' @export
-# ===============================
-# DOPE: Multi-trajectory wrapper
-# (linear or branched) — single file
-# ===============================
 
-# ---------- Small utilities ----------
-`%||%` <- function(x, y) if (is.null(x) || (length(x) == 1 && is.na(x))) y else x
 
+# ---------- Small utilities ----------.
 # Detect whether a function supports an argument by name
 .has_formal <- function(fun, arg) {
   is.function(fun) && !is.null(names(formals(fun))) && arg %in% names(formals(fun))
@@ -159,36 +208,32 @@ subset_by_clusters <- function(expr_or_seurat,
 # ===============================
 # Core single-trajectory wrapper
 # ===============================
-#' Compute DOPE for a single trajectory (linear or branched)
-#' @export
-compute_DOPE_single <- function(expr_or_seurat,
-                                pseudotime,
-                                naive_markers,
-                                terminal_markers,
-                                cluster_labels = NULL,
-                                naive_clusters = NULL,
-                                terminal_clusters = NULL,
-                                pathways = NULL,
-                                gene_sets = NULL,
-                                E_method = c("gmm", "clusters", "combined"),
-                                id_type = c("SYMBOL", "ENSEMBL", "ENTREZID"),
-                                species = "Homo sapiens",
-                                assay = NULL,
-                                slot = "data",
-                                min_remaining = 10,
-                                min_fraction = 0.20,
-                                min_genes_per_module = 3,
-                                plot_E = TRUE,
-                                verbose = FALSE,
-                                trajectory = c("linear","branched"),
-                                branch_include = NULL,
-                                branch_exclude = NULL,
-                                branch_min_cells = 10,
-                                drop_unused_levels = TRUE,
-                                tol = 1e-8) {
+compute_single_DOPE_linear <- function(expr_or_seurat,
+                                       pseudotime,
+                                       naive_markers,
+                                       terminal_markers,
+                                       cluster_labels = NULL,
+                                       naive_clusters = NULL,
+                                       terminal_clusters = NULL,
+                                       pathways = NULL,
+                                       gene_sets = NULL,
+                                       E_method = c("gmm", "clusters", "combined"),
+                                       id_type = c("SYMBOL", "ENSEMBL", "ENTREZID"),
+                                       species = "Homo sapiens",
+                                       assay = NULL,
+                                       slot = "data",
+                                       min_remaining = 10,
+                                       min_fraction = 0.20,
+                                       min_genes_per_module = 3,
+                                       plot_E = TRUE,
+                                       verbose = FALSE,
+                                       branch_include = NULL,
+                                       branch_exclude = NULL,
+                                       branch_min_cells = 10,
+                                       drop_unused_levels = TRUE,
+                                       tol = 1e-8) {
   E_method   <- match.arg(E_method)
   id_type    <- match.arg(id_type)
-  trajectory <- match.arg(trajectory)
 
   expr <- .get_expr(expr_or_seurat, assay = assay, slot = slot)
   cells_all <- if (inherits(expr_or_seurat, "Seurat")) Seurat::Cells(expr_or_seurat) else colnames(expr)
@@ -201,26 +246,7 @@ compute_DOPE_single <- function(expr_or_seurat,
     }
   }
 
-  # branched: subset first
-  if (trajectory == "branched") {
-    if (is.null(cluster_labels)) {
-      stop("For trajectory='branched', provide 'cluster_labels' (Seurat meta column or per-cell vector).")
-    }
-    sub <- subset_by_clusters(
-      expr_or_seurat = expr_or_seurat,
-      clusters = if (inherits(expr_or_seurat, "Seurat") && is.character(cluster_labels) && length(cluster_labels) == 1)
-        expr_or_seurat[[cluster_labels]][,1,drop=TRUE] else cluster_labels,
-      include = branch_include,
-      exclude = branch_exclude,
-      min_cells = branch_min_cells,
-      drop_unused_levels = drop_unused_levels,
-      assay = assay
-    )
-    expr <- .get_expr(sub$obj, assay = assay, slot = slot)
-    kept_cells <- if (inherits(sub$obj, "Seurat")) Seurat::Cells(sub$obj) else colnames(expr)
-    pseudotime <- .align_to_cells(pseudotime, kept_cells, what = "pseudotime")
-    cluster_labels <- sub$cluster_labels
-  }
+
 
   if (length(pseudotime) != ncol(expr)) {
     stop("Length of pseudotime must match number of cells in expression data after alignment/subsetting.")
@@ -307,182 +333,22 @@ compute_DOPE_single <- function(expr_or_seurat,
     errors = list(D_error = D_res$error, O_error = O_res$error, P_error = P_res$error, E_error = E_res$error)
   )
   class(out) <- "dope_results"
-  out
+
+
+  plot_metrics_D(pseudotime,D_res)
+  plot_metrics_O(expr,pseudotime,O_res,
+                 naive_markers,terminal_markers)
+  plot_metrics_P(expr,pseudotime, P_res)
+  plot_metrics_E(E_res)
+
+  return (out = out)
+
 }
 
-# ===============================
-# Multi-trajectory wrapper
-# ===============================
-#' DOPE: Comprehensive pseudotime trajectory quality assessment for multiple trajectories
-#' @export
-compute_multi_DOPE <- function(expr_or_seurat,
-                               pseudotime_list,
-                               naive_markers,
-                               terminal_markers,
-                               cluster_labels = NULL,
-                               naive_clusters = NULL,
-                               terminal_clusters = NULL,
-                               pathways = NULL,
-                               gene_sets = NULL,
-                               E_method = c("gmm", "clusters", "combined"),
-                               id_type = c("SYMBOL", "ENSEMBL", "ENTREZID"),
-                               species = "Homo sapiens",
-                               assay = NULL,
-                               slot = "data",
-                               min_remaining = 10,
-                               min_fraction = 0.20,
-                               min_genes_per_module = 3,
-                               plot_E = TRUE,
-                               verbose = TRUE,
-                               parallel = FALSE,
-                               n_cores = NULL,
-                               trajectory = c("linear","branched"),
-                               branch_include = NULL,
-                               branch_exclude = NULL,
-                               branch_min_cells = 10,
-                               drop_unused_levels = TRUE,
-                               tol = 1e-8) {
 
-  E_method   <- match.arg(E_method)
-  id_type    <- match.arg(id_type)
-  trajectory <- match.arg(trajectory)
 
-  if (!is.list(pseudotime_list)) stop("pseudotime_list must be a list of pseudotime vectors")
-  if (is.null(names(pseudotime_list))) names(pseudotime_list) <- paste0("trajectory_", seq_along(pseudotime_list))
-  n_trajectories <- length(pseudotime_list)
 
-  if (verbose) {
-    cat("Computing DOPE metrics for", n_trajectories, "trajectories...\n")
-    cat("==========================================================\n")
-  }
-
-  # Set up parallel
-  use_parallel <- FALSE
-  if (parallel && n_trajectories > 1) {
-    if (!requireNamespace("parallel", quietly = TRUE)) {
-      warning("parallel package not available, running sequentially")
-    } else {
-      if (is.null(n_cores)) n_cores <- max(1, parallel::detectCores() - 1)
-      if (verbose) cat("Using", n_cores, "cores for parallel processing\n")
-      use_parallel <- TRUE
-    }
-  }
-
-  compute_single_dope <- function(trajectory_name, pseudotime_vector) {
-    if (verbose) cat("\n--- Processing trajectory:", trajectory_name, "---\n")
-    tryCatch({
-      res <- compute_DOPE_single(
-        expr_or_seurat = expr_or_seurat,
-        pseudotime     = pseudotime_vector,
-        naive_markers  = naive_markers,
-        terminal_markers = terminal_markers,
-        cluster_labels = cluster_labels,
-        naive_clusters = naive_clusters,
-        terminal_clusters = terminal_clusters,
-        pathways = pathways,
-        gene_sets = gene_sets,
-        E_method = E_method,
-        id_type = id_type,
-        species = species,
-        assay = assay,
-        slot = slot,
-        min_remaining = min_remaining,
-        min_fraction = min_fraction,
-        min_genes_per_module = min_genes_per_module,
-        plot_E = plot_E,
-        verbose = verbose,
-        trajectory = trajectory,
-        branch_include = branch_include,
-        branch_exclude = branch_exclude,
-        branch_min_cells = branch_min_cells,
-        drop_unused_levels = drop_unused_levels,
-        tol = tol
-      )
-      res$trajectory_name <- trajectory_name
-      res
-    }, error = function(e) {
-      warning(paste("Error processing trajectory", trajectory_name, ":", e$message))
-      list(
-        trajectory_name = trajectory_name,
-        D = list(D_naive = NA, D_term = NA),
-        O = list(O = NA),
-        P = list(P = NA),
-        E = list(E_naive = NA, E_term = NA, E_comp = NA),
-        DOPE_score = NA,
-        errors = list(D_error = e$message, O_error = e$message, P_error = e$message, E_error = e$message)
-      )
-    })
-  }
-
-  if (use_parallel) {
-    cl <- parallel::makeCluster(n_cores)
-    on.exit(parallel::stopCluster(cl), add = TRUE)
-    parallel::clusterExport(
-      cl,
-      varlist = c("compute_DOPE_single",
-                  "metrics_D","metrics_O","metrics_P","metrics_E",
-                  ".get_expr",".per_cell_score",".align_to_cells","subset_by_clusters","%||%", ".has_formal"),
-      envir = environment()
-    )
-    # If you need packages on workers, load them here:
-    # parallel::clusterEvalQ(cl, { library(Seurat) })
-
-    idxs <- seq_along(pseudotime_list)
-    trajectory_results <- parallel::parLapply(
-      cl, idxs,
-      function(i) {
-        nm <- names(pseudotime_list)[i]
-        compute_single_dope(nm, pseudotime_list[[i]])
-      }
-    )
-    names(trajectory_results) <- names(pseudotime_list)
-  } else {
-    trajectory_results <- Map(compute_single_dope, names(pseudotime_list), pseudotime_list)
-    names(trajectory_results) <- names(pseudotime_list)
-  }
-
-  comparison_summary <- create_comparison_summary(trajectory_results)
-
-  valid_scores <- comparison_summary$DOPE_score[!is.na(comparison_summary$DOPE_score)]
-  best_trajectory <- if (length(valid_scores) > 0) {
-    comparison_summary$trajectory[which.max(comparison_summary$DOPE_score)]
-  } else NA_character_
-
-  multi_results <- list(
-    results = trajectory_results,
-    comparison_summary = comparison_summary,
-    best_trajectory = best_trajectory,
-    n_trajectories = n_trajectories,
-    method_info = list(
-      E_method = E_method,
-      id_type = id_type,
-      species = species,
-      parallel = use_parallel,
-      n_cores = if (use_parallel) n_cores else NA_integer_,
-      trajectory = trajectory,
-      branch_include = branch_include,
-      branch_exclude = branch_exclude,
-      branch_min_cells = branch_min_cells
-    )
-  )
-  class(multi_results) <- "multi_dope_results"
-
-  if (verbose) {
-    cat("\n==========================================================\n")
-    cat("Multi-trajectory DOPE analysis complete!\n")
-    if (!is.na(best_trajectory)) {
-      best_score <- comparison_summary$DOPE_score[comparison_summary$trajectory == best_trajectory]
-      cat(sprintf("Best trajectory: %s (DOPE score: %.3f)\n", best_trajectory, best_score))
-    }
-  }
-  multi_results
-}
-
-# ===============================
-# Comparison summary / printing / plotting
-# ===============================
-#' Create comparison summary across trajectories
-#' @export
+# ------create_comparison_summary---------
 create_comparison_summary <- function(trajectory_results) {
   if (length(trajectory_results) == 0) stop("trajectory_results cannot be empty")
 
@@ -532,54 +398,337 @@ create_comparison_summary <- function(trajectory_results) {
   summary_data
 }
 
+
+
+# ===============================
+# Multi-trajectory wrapper
+# ===============================
+#' Compute DOPE metrics for multiple linear trajectories
+#'
+#' @description
+#' Runs the full DOPE pipeline (Directionality **D**, Order consistency **O**,
+#' Program coherence **P**, Endpoints validity **E**, and the combined
+#' `DOPE_score`) across **multiple linear** pseudotime vectors sharing the
+#' same expression object. Results are collected per trajectory and summarized
+#' in a comparison table with the best trajectory highlighted.
+#'
+#' @details
+#' This function is a convenience wrapper that repeatedly calls
+#' [compute_single_DOPE_linear()] for each linear trajectory provided in
+#' `pseudotime_list`. It supports optional parallelization via the
+#' **parallel** package (fork/PSOCK, depending on platform).
+#'
+#' If `pseudotime_list` is unnamed, trajectories are auto-named as
+#' `"trajectory_1"`, `"trajectory_2"`, etc.
+#'
+#' @param expr_or_seurat A gene expression matrix (genes × cells),
+#'   a `dgCMatrix`, a `data.frame` (coerced to matrix), or a Seurat object.
+#'   If Seurat, `assay` and `slot` control which assay/slot is used.
+#' @param pseudotime_list A named or unnamed **list** of numeric pseudotime
+#'   vectors (one per trajectory). Each vector must have length equal to the
+#'   number of columns/cells of `expr_or_seurat` (after extraction).
+#' @param naive_markers Character vector of gene symbols/IDs for naïve/early
+#'   programs (used by D/O/E/P as relevant).
+#' @param terminal_markers Character vector of gene symbols/IDs for terminal/late
+#'   programs.
+#' @param cluster_labels Optional character/factor vector of cluster labels
+#'   (one per cell) used by E (when `E_method = "clusters"` or `"combined"`).
+#' @param naive_clusters Optional character vector of cluster names considered
+#'   naïve (E Case 2 / cluster-based).
+#' @param terminal_clusters Optional character vector of cluster names considered
+#'   terminal (E Case 2 / cluster-based).
+#' @param pathways Optional list of pathway name → gene vector (used by P).
+#' @param gene_sets Optional list of additional gene sets name → gene vector
+#'   (also used by P).
+#' @param E_method Endpoints validity method. One of `"gmm"`, `"clusters"`,
+#'   or `"combined"`. See [compute_single_DOPE_linear()] for details.
+#' @param id_type Gene identifier type for markers/pathways. One of
+#'   `"SYMBOL"`, `"ENSEMBL"`, or `"ENTREZID"`.
+#' @param species Species name used for ID mapping (e.g., `"Homo sapiens"`).
+#' @param assay If `expr_or_seurat` is a Seurat object, the assay to use.
+#'   If `NULL`, defaults to `Seurat::DefaultAssay()`.
+#' @param slot If `expr_or_seurat` is a Seurat object, the assay slot to
+#'   extract (e.g., `"data"`, `"counts"`). Default `"data"`.
+#' @param min_remaining Minimum number of genes to retain after filtering
+#'   within sub-steps (safety check).
+#' @param min_fraction Minimum retained fraction of genes after filtering
+#'   (safety check).
+#' @param min_genes_per_module Minimum number of genes required per program/
+#'   module to compute stable scores.
+#' @param plot_E Logical; if `TRUE`, produce diagnostic density plots when
+#'   `E_method` uses GMM.
+#' @param verbose Logical; print progress.
+#' @param parallel Logical; if `TRUE` and multiple trajectories are provided,
+#'   use **parallel** workers.
+#' @param n_cores Integer number of cores. If `NULL`, uses `detectCores()-1`.
+#' @param drop_unused_levels Logical; drop unused factor levels (where relevant).
+#' @param tol Numerical tolerance for internal numerical checks.
+#'
+#' @return
+#' An object of class `"multi_dope_results"` with components:
+#' \itemize{
+#'   \item \code{results}: named list of per-trajectory DOPE results
+#'         (each as returned by \code{compute_single_DOPE_linear()}).
+#'   \item \code{comparison_summary}: \code{data.frame} summarizing
+#'         D/O/P/E and \code{DOPE_score} per trajectory.
+#'   \item \code{best_trajectory}: character scalar with the name of the
+#'         highest-scoring trajectory (or \code{NA} if none valid).
+#'   \item \code{n_trajectories}: integer count.
+#'   \item \code{method_info}: list of key settings used.
+#' }
+#'
+#' @seealso [compute_single_DOPE_linear()], plotting helpers like
+#'   \code{plot.multi_dope_results()}.
+#'
+#' @examples
+#' \dontrun{
+#' # expr: genes x cells matrix; pt1, pt2: numeric pseudotime vectors (length = ncol(expr))
+#' res <- compute_multi_DOPE_linear(
+#'   expr_or_seurat = expr,
+#'   pseudotime_list = list(linear_a = pt1, linear_b = pt2),
+#'   naive_markers = c("TCF7","LEF1"),
+#'   terminal_markers = c("GZMB","PRF1"),
+#'   E_method = "combined",
+#'   parallel = TRUE
+#' )
+#' res$comparison_summary
+#' res$best_trajectory
+#' }
+#'
 #' @export
-print.multi_dope_results <- function(x, ...) {
-  cat("Multi-Trajectory DOPE Analysis\n")
-  cat("==============================\n\n")
 
-  cat("Analysis info:\n")
-  cat(sprintf("  Trajectories analyzed: %d\n", x$n_trajectories))
-  cat(sprintf("  E method: %s\n", x$method_info$E_method))
-  if (isTRUE(x$method_info$parallel)) cat(sprintf("  Parallel processing: %d cores\n", x$method_info$n_cores))
-  cat(sprintf("  Trajectory mode: %s\n\n", x$method_info$trajectory))
+compute_multi_DOPE_linear <- function(
+    expr_or_seurat,
+    pseudotime_list,
+    naive_markers,
+    terminal_markers,
+    cluster_labels      = NULL,
+    naive_clusters      = NULL,
+    terminal_clusters   = NULL,
+    pathways            = NULL,
+    gene_sets           = NULL,
+    E_method            = c("gmm", "clusters", "combined"),
+    id_type             = c("SYMBOL", "ENSEMBL", "ENTREZID"),
+    species             = "Homo sapiens",
+    assay               = NULL,
+    slot                = "data",
+    min_remaining       = 10,
+    min_fraction        = 0.20,
+    min_genes_per_module = 3,
+    plot_E              = TRUE,
+    verbose             = TRUE,
+    parallel            = FALSE,
+    n_cores             = NULL,
+    branch_include      = NULL,
+    branch_exclude      = NULL,
+    branch_min_cells    = 10,
+    drop_unused_levels  = TRUE,
+    tol                 = 1e-8
+) {
+  E_method   <- match.arg(E_method)
+  id_type    <- match.arg(id_type)
 
-  cat("Trajectory Comparison:\n")
-  cat("---------------------\n")
-  top_n <- min(5, nrow(x$comparison_summary))
-  top_trajectories <- x$comparison_summary[1:top_n, ]
-
-  for (i in seq_len(nrow(top_trajectories))) {
-    traj <- top_trajectories[i, ]
-    rank_suffix <- switch(as.character(i), "1"="st","2"="nd","3"="rd","th")
-    dope_score <- if (is.na(traj$DOPE_score)) "NA" else sprintf("%.3f", traj$DOPE_score)
-    cat(sprintf("%d%s: %s (DOPE: %s)\n", i, rank_suffix, traj$trajectory, dope_score))
+  if (!is.list(pseudotime_list)) {
+    stop("pseudotime_list must be a list of pseudotime vectors")
   }
-  if (!is.na(x$best_trajectory)) cat(sprintf("\nBest trajectory: %s\n", x$best_trajectory))
-  cat("\nUse summary() for detailed comparison table\n")
+  if (is.null(names(pseudotime_list))) {
+    names(pseudotime_list) <- paste0("trajectory_", seq_along(pseudotime_list))
+  }
+
+  n_trajectories <- length(pseudotime_list)
+
+  if (verbose) {
+    cat("Computing DOPE metrics for", n_trajectories, "trajectories...\n")
+    cat("==========================================================\n")
+  }
+
+  # ---- Parallel setup -------------------------------------------------------
+  use_parallel <- FALSE
+  if (parallel && n_trajectories > 1) {
+    if (!requireNamespace("parallel", quietly = TRUE)) {
+      warning("parallel package not available, running sequentially")
+    } else {
+      if (is.null(n_cores)) n_cores <- max(1, parallel::detectCores() - 1)
+      if (verbose) cat("Using", n_cores, "cores for parallel processing\n")
+      use_parallel <- TRUE
+    }
+  }
+
+  # ---- Worker: single trajectory -------------------------------------------
+  compute_single_dope <- function(trajectory_name, pseudotime_vector) {
+    if (verbose) cat("\n--- Processing trajectory:", trajectory_name, "---\n")
+
+    tryCatch(
+      {
+        res <- compute_single_DOPE_linear(
+          expr_or_seurat   = expr_or_seurat,
+          pseudotime       = pseudotime_vector,
+          naive_markers    = naive_markers,
+          terminal_markers = terminal_markers,
+          cluster_labels   = cluster_labels,
+          naive_clusters   = naive_clusters,
+          terminal_clusters = terminal_clusters,
+          pathways         = pathways,
+          gene_sets        = gene_sets,
+          E_method         = E_method,
+          id_type          = id_type,
+          species          = species,
+          assay            = assay,
+          slot             = slot,
+          min_remaining    = min_remaining,
+          min_fraction     = min_fraction,
+          min_genes_per_module = min_genes_per_module,
+          plot_E           = plot_E,
+          verbose          = verbose,
+          branch_include   = branch_include,
+          branch_exclude   = branch_exclude,
+          branch_min_cells = branch_min_cells,
+          drop_unused_levels = drop_unused_levels,
+          tol              = tol
+        )
+        res$trajectory_name <- trajectory_name
+        res
+      },
+      error = function(e) {
+        warning(paste("Error processing trajectory", trajectory_name, ":", e$message))
+        list(
+          trajectory_name = trajectory_name,
+          D = list(D_naive = NA, D_term = NA),
+          O = list(O = NA),
+          P = list(P = NA),
+          E = list(E_naive = NA, E_term = NA, E_comp = NA),
+          DOPE_score = NA,
+          errors = list(
+            D_error = e$message,
+            O_error = e$message,
+            P_error = e$message,
+            E_error = e$message
+          )
+        )
+      }
+    )
+  }
+
+  # ---- Run over trajectories ------------------------------------------------
+  if (use_parallel) {
+    cl <- parallel::makeCluster(n_cores)
+    on.exit(parallel::stopCluster(cl), add = TRUE)
+
+    parallel::clusterExport(
+      cl,
+      varlist = c(
+        "compute_single_dope", "metrics_D", "metrics_O", "metrics_P", "metrics_E",
+        ".get_expr", ".per_cell_score", ".align_to_cells", "subset_by_clusters",
+        "%||%", ".has_formal"
+      ),
+      envir = environment()
+    )
+    # Load packages on workers if needed, e.g.:
+    # parallel::clusterEvalQ(cl, { library(Seurat) })
+
+    idxs <- seq_along(pseudotime_list)
+    trajectory_results <- parallel::parLapply(
+      cl, idxs,
+      function(i) {
+        nm <- names(pseudotime_list)[i]
+        compute_single_dope(nm, pseudotime_list[[i]])
+      }
+    )
+    names(trajectory_results) <- names(pseudotime_list)
+
+  } else {
+    trajectory_results <- Map(
+      compute_single_dope,
+      names(pseudotime_list),
+      pseudotime_list
+    )
+    names(trajectory_results) <- names(pseudotime_list)
+  }
+
+  # ---- Summarize & pick best ------------------------------------------------
+  comparison_summary <- create_comparison_summary(trajectory_results)
+
+  valid_scores <- comparison_summary$DOPE_score[!is.na(comparison_summary$DOPE_score)]
+  best_trajectory <- if (length(valid_scores) > 0) {
+    comparison_summary$trajectory[which.max(comparison_summary$DOPE_score)]
+  } else {
+    NA_character_
+  }
+
+  multi_results <- list(
+    results           = trajectory_results,
+    comparison_summary = comparison_summary,
+    best_trajectory   = best_trajectory,
+    n_trajectories    = n_trajectories,
+    method_info = list(
+      E_method         = E_method,
+      id_type          = id_type,
+      species          = species,
+      parallel         = use_parallel,
+      n_cores          = if (use_parallel) n_cores else NA_integer_,
+      branch_include   = branch_include,
+      branch_exclude   = branch_exclude,
+      branch_min_cells = branch_min_cells
+    )
+  )
+  class(multi_results) <- "multi_dope_results"
+
+  if (verbose) {
+    cat("\n==========================================================\n")
+    cat("Multi-trajectory DOPE analysis complete!\n")
+    if (!is.na(best_trajectory)) {
+      best_score <- comparison_summary$DOPE_score[
+        comparison_summary$trajectory == best_trajectory
+      ]
+      cat(sprintf("Best trajectory: %s (DOPE score: %.3f)\n",
+                  best_trajectory, best_score))
+    }
+  }
+
+  multi_results
 }
 
-#' @export
-summary.multi_dope_results <- function(object, ...) {
-  print(object)
-  cat("\nDetailed Comparison Table:\n")
-  cat("=========================\n")
-  display_cols <- c("trajectory","DOPE_score","DOPE_score_rank","D_term","O","P","E_comp")
-  display_cols <- display_cols[display_cols %in% names(object$comparison_summary)]
-  display_data <- object$comparison_summary[, display_cols, drop = FALSE]
-  numeric_cols <- vapply(display_data, is.numeric, logical(1))
-  display_data[numeric_cols] <- lapply(display_data[numeric_cols], function(x) ifelse(is.na(x), "NA", sprintf("%.3f", x)))
-  print(display_data, row.names = FALSE)
 
-  if (!is.na(object$best_trajectory)) {
-    cat(sprintf("\nDetailed results for best trajectory (%s):\n", object$best_trajectory))
-    cat("==========================================\n")
-    best_result <- object$results[[object$best_trajectory]]
-    if (inherits(best_result, "dope_results")) print(best_result)
-  }
-  invisible(object)
-}
 
-#' @export
+
+
+#' Plot DOPE Metrics Comparison Across Trajectories
+#'
+#' Generate visualizations of DOPE metrics from a multi-trajectory comparison.
+#' Supports bar plots, radar charts, and heatmaps for intuitive comparison
+#' across multiple trajectory inference methods.
+#'
+#' @param multi_dope_results A list-like object containing a `comparison_summary`
+#'   data frame. Must include a column named `"trajectory"` and columns for the
+#'   specified metrics.
+#' @param metrics Character vector of metric names to plot. Defaults to
+#'   \code{c("D_naive","D_term","O","P","E_naive","E_term","DOPE_score")}.
+#' @param type Character string indicating the plot type. One of:
+#'   \code{"bar"} (default), \code{"radar"}, or \code{"heatmap"}.
+#'
+#' @details
+#' - **Bar plots**: show metric scores per trajectory using grouped bars.
+#'   Requires the \pkg{reshape2} package.
+#' - **Radar charts**: display metrics in a radial layout for each trajectory.
+#'   Requires the \pkg{fmsb} package.
+#' - **Heatmaps**: present metric values in a matrix form with annotated scores.
+#'   Requires the \pkg{reshape2} package.
+#'
+#' Values are automatically constrained between 0 and 1 for radar charts.
+#' Missing values are displayed as 0 in radar plots and labeled as "NA" in heatmaps.
+#'
+#' @return
+#' - For \code{type = "bar"} or \code{"heatmap"}: a \pkg{ggplot2} object.
+#' - For \code{type = "radar"}: draws the plot and invisibly returns the plotting function.
+#'
+#' @examples
+#' \dontrun{
+#' # Example with comparison_summary data
+#' plot.multi_dope_results(multi_dope_results, type = "bar")
+#' plot.multi_dope_results(multi_dope_results, type = "radar")
+#' plot.multi_dope_results(multi_dope_results, type = "heatmap")
+#' }
+#'
 plot.multi_dope_results <- function(multi_dope_results,
                                     metrics = c("D_naive","D_term","O","P","E_naive","E_term","DOPE_score"),
                                     type = "bar") {

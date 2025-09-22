@@ -46,7 +46,45 @@ P <- metrics_P(expr,
 plot_metrics_P(expr,seu$monocle3_pseudotime, P)
 ```
 ```{r}
-
+E <- metrics_E(seu$monocle3_pseudotime,
+              naive_marker_scores = D$s_i_naive,
+              terminal_marker_scores = D$s_i_term,
+              method = c("gmm"))
+plot_metrics_E(E)            
+```
+```{r}
+compute_DOPE_single(seu,
+                    seu$cytotrace_score,
+                    naive_markers = naive,
+                    terminal_markers = term, 
+                    pathways = c("hsa04660","hsa04640"))
 ```
 
+```{r}
+compute_DOPE_single(seu,
+                    seu$monocle3_pseudotime,
+                    naive_markers = naive,
+                    terminal_markers = term, 
+                    pathways = c("hsa04660","hsa04640"))
+```
+
+```{r}
+compute_single_DOPE_linear(seu,
+                    seu$slingshot_pseudotime,
+                    naive_markers = naive,
+                    terminal_markers = term, 
+                    pathways = c("hsa04660","hsa04640"))
+```
+```{r}
+pseudotime_methods <- list(
+  "monocle3" = seu$monocle3_pseudotime,
+  "slingshot" = seu$slingshot_pseudotime, 
+  "CytoTRACE" = seu$cytotrace_score
+)
+
+compute_multi_DOPE_linear(seu,
+                          pseudotime_list = pseudotime_methods,
+                          naive_markers = naive,
+                          terminal_markers =term)
+```
 

@@ -15,6 +15,9 @@ Suggests:
     AnnotationDbi,
     org.Hs.eg.db,
     msigdbr,
-    parallel
+    parallel,
+    knitr,
+    rmarkdown
 URL: https://github.com/irislity/BioTrajX
 BugReports: https://github.com/irislity/BioTrajX/issues
+VignetteBuilder: knitr

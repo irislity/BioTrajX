@@ -8,6 +8,7 @@
   if (length(miss)) stop("Missing names in ", label, ": ", paste(miss, collapse = ", "))
 }
 
+#' @noRd
 `%||%` <- function(x, y) if (is.null(x) || (length(x) == 1 && is.na(x))) y else x
 
 # Detect whether a function supports an argument by name
@@ -441,83 +442,7 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
   return(res)
 }
 
-# ---------- Summary / Print / Plot ----------
-create_comparison_summary_branched <- function(trajectory_results) {
-  if (length(trajectory_results) == 0) stop("trajectory_results cannot be empty")
-
-  rows <- vector("list", length(trajectory_results$results))
-  for (i in seq_along(trajectory_results$results)) {
-    traj_name <- names(trajectory_results$results)[i] %||% paste0("Trajectory_", i)
-    res_i     <- trajectory_results$results[[i]]
-    rows[[i]] <- .flatten_traj_result(res_i, traj_name)
-  }
-  summary_data <- do.call(rbind, rows)
-
-  metric_cols <- c("D_naive","D_term","O","P","E_naive","E_term","E_comp","DOPE_score")
-  metric_cols <- intersect(metric_cols, names(summary_data))
-  summary_data <- .add_metric_ranks(summary_data, metric_cols)
-
-  ord <- order(summary_data$DOPE_score, decreasing = TRUE, na.last = TRUE,
-               summary_data$trajectory, summary_data$branch)
-  summary_data <- summary_data[ord, , drop = FALSE]
-  rownames(summary_data) <- NULL
-  summary_data
-}
-
-print.multi_dope_results <- function(x, ...) {
-  cat("Multi-Trajectory DOPE Analysis\n")
-  cat("==============================\n\n")
-  cat("Analysis info:\n")
-  cat(sprintf("  Trajectories analyzed: %d\n", x$n_trajectories %||% length(x$results)))
-  if (!is.null(x$method_info$E_method)) cat(sprintf("  E method: %s\n", x$method_info$E_method))
-  if (isTRUE(x$method_info$parallel)) cat(sprintf("  Parallel processing: %d cores\n", x$method_info$n_cores))
-  cat(sprintf("  Trajectory mode: %s\n\n", x$method_info$trajectory %||% "branched"))
-
-  cat("Top Trajectories/Branches:\n")
-  cat("--------------------------\n")
-  top_n <- min(5, nrow(x$comparison_summary))
-  top_rows <- x$comparison_summary[seq_len(top_n), ]
-
-  for (i in seq_len(nrow(top_rows))) {
-    row <- top_rows[i, ]
-    rank_suffix <- c("st","nd","rd","th")[pmin(i,4)]
-    name <- if (!is.na(row$branch)) sprintf("%s ⟂ %s", row$trajectory, row$branch) else row$trajectory
-    dope_score <- if (is.na(row$DOPE_score)) "NA" else sprintf("%.3f", row$DOPE_score)
-    cat(sprintf("%d%s: %s (DOPE: %s)\n", i, rank_suffix, name, dope_score))
-  }
-
-  if (!is.na(x$best_trajectory)) cat(sprintf("\nBest: %s\n", x$best_trajectory))
-  cat("\nUse summary() for detailed comparison table\n")
-}
-
-summary.multi_dope_results <- function(object, ...) {
-  cat("\nDetailed Comparison Table:\n")
-  cat("=========================\n")
-  display_cols <- c("trajectory","branch","DOPE_score","DOPE_score_rank","D_term","O","P","E_comp")
-  display_cols <- display_cols[display_cols %in% names(object$comparison_summary)]
-  display_data <- object$comparison_summary[, display_cols, drop = FALSE]
-  numeric_cols <- vapply(display_data, is.numeric, logical(1))
-  display_data[numeric_cols] <- lapply(display_data[numeric_cols], function(x) ifelse(is.na(x), "NA", sprintf("%.3f", x)))
-  print(display_data, row.names = FALSE)
-
-  if (!is.na(object$best_trajectory)) {
-    cat(sprintf("\nDetailed results for best (%s):\n", object$best_trajectory))
-    cat("================================\n")
-    bt <- object$best_trajectory
-    best_result <- NULL
-    if (!is.null(object$results[[bt]])) {
-      best_result <- object$results[[bt]]
-    } else {
-      parts <- strsplit(bt, "::", fixed = TRUE)[[1]]
-      if (length(parts) == 2 && !is.null(object$results[[parts[1]]])) {
-        best_result <- object$results[[parts[1]]]$branches[[parts[2]]]
-      }
-    }
-    if (!is.null(best_result) && inherits(best_result, "dope_results")) print(best_result)
-  }
-  invisible(object)
-}
-
+# ---------- Plot ----------
 plot.multi_dope_results <- function(multi_dope_results,
                                     metrics = c("D_naive","D_term","O","P","E_naive","E_term","DOPE_score"),
                                     type = "bar",
