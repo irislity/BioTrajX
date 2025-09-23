@@ -55,7 +55,7 @@
 
 # ---------- Core: single trajectory across multiple branches ----------
 #' Compute DOPE for one pseudotime with multiple branches
-compute_DOPE_single_branched <- function(expr_or_seurat,
+compute_single_DOPE_branched <- function(expr_or_seurat,
                                          pseudotime,
                                          naive_markers_list,
                                          terminal_markers_list,
@@ -294,7 +294,7 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
 
   run_one <- function(name, pt) {
     if (isTRUE(verbose)) message("\n=== Trajectory: ", name, " ===")
-    out <- compute_DOPE_single_branched(
+    out <- compute_single_DOPE_branched(
       expr_or_seurat = expr_or_seurat,
       pseudotime = pt,
       naive_markers_list = naive_markers_list,
@@ -330,7 +330,7 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
       function(i) {
         name <- names(pseudotime_list)[i]
         pt   <- pseudotime_list[[i]]
-        run_one(name, pt)  # NOTE: compute_DOPE_single_branched must be visible on workers
+        run_one(name, pt)  # NOTE: compute_single_DOPE_branched must be visible on workers
       }
     )
     names(res_list) <- names(pseudotime_list)

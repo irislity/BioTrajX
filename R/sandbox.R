@@ -1,243 +1,218 @@
-# ===============================
-# Multi-trajectory wrapper
-# ===============================
-#' Compute DOPE metrics for multiple linear trajectories
-#'
-#' @description
-#' Runs the full DOPE pipeline (Directionality **D**, Order consistency **O**,
-#' Program coherence **P**, Endpoints validity **E**, and the combined
-#' `DOPE_score`) across **multiple linear** pseudotime vectors sharing the
-#' same expression object. Results are collected per trajectory and summarized
-#' in a comparison table with the best trajectory highlighted.
-#'
-#' @details
-#' This function is a convenience wrapper that repeatedly calls
-#' [compute_single_DOPE_linear()] for each linear trajectory provided in
-#' `pseudotime_list`. It supports optional parallelization via the
-#' **parallel** package (fork/PSOCK, depending on platform).
-#'
-#' If `pseudotime_list` is unnamed, trajectories are auto-named as
-#' `"trajectory_1"`, `"trajectory_2"`, etc.
-#'
-#' @param expr_or_seurat A gene expression matrix (genes × cells),
-#'   a `dgCMatrix`, a `data.frame` (coerced to matrix), or a Seurat object.
-#'   If Seurat, `assay` and `slot` control which assay/slot is used.
-#' @param pseudotime_list A named or unnamed **list** of numeric pseudotime
-#'   vectors (one per trajectory). Each vector must have length equal to the
-#'   number of columns/cells of `expr_or_seurat` (after extraction).
-#' @param naive_markers Character vector of gene symbols/IDs for naïve/early
-#'   programs (used by D/O/E/P as relevant).
-#' @param terminal_markers Character vector of gene symbols/IDs for terminal/late
-#'   programs.
-#' @param cluster_labels Optional character/factor vector of cluster labels
-#'   (one per cell) used by E (when `E_method = "clusters"` or `"combined"`).
-#' @param naive_clusters Optional character vector of cluster names considered
-#'   naïve (E Case 2 / cluster-based).
-#' @param terminal_clusters Optional character vector of cluster names considered
-#'   terminal (E Case 2 / cluster-based).
-#' @param pathways Optional list of pathway name → gene vector (used by P).
-#' @param gene_sets Optional list of additional gene sets name → gene vector
-#'   (also used by P).
-#' @param E_method Endpoints validity method. One of `"gmm"`, `"clusters"`,
-#'   or `"combined"`. See [compute_single_DOPE_linear()] for details.
-#' @param id_type Gene identifier type for markers/pathways. One of
-#'   `"SYMBOL"`, `"ENSEMBL"`, or `"ENTREZID"`.
-#' @param species Species name used for ID mapping (e.g., `"Homo sapiens"`).
-#' @param assay If `expr_or_seurat` is a Seurat object, the assay to use.
-#'   If `NULL`, defaults to `Seurat::DefaultAssay()`.
-#' @param slot If `expr_or_seurat` is a Seurat object, the assay slot to
-#'   extract (e.g., `"data"`, `"counts"`). Default `"data"`.
-#' @param min_remaining Minimum number of genes to retain after filtering
-#'   within sub-steps (safety check).
-#' @param min_fraction Minimum retained fraction of genes after filtering
-#'   (safety check).
-#' @param min_genes_per_module Minimum number of genes required per program/
-#'   module to compute stable scores.
-#' @param plot_E Logical; if `TRUE`, produce diagnostic density plots when
-#'   `E_method` uses GMM.
-#' @param verbose Logical; print progress.
-#' @param parallel Logical; if `TRUE` and multiple trajectories are provided,
-#'   use **parallel** workers.
-#' @param n_cores Integer number of cores. If `NULL`, uses `detectCores()-1`.
-#' @param drop_unused_levels Logical; drop unused factor levels (where relevant).
-#' @param tol Numerical tolerance for internal numerical checks.
-#'
-#' @return
-#' An object of class `"multi_dope_results"` with components:
-#' \itemize{
-#'   \item \code{results}: named list of per-trajectory DOPE results
-#'         (each as returned by \code{compute_single_DOPE_linear()}).
-#'   \item \code{comparison_summary}: \code{data.frame} summarizing
-#'         D/O/P/E and \code{DOPE_score} per trajectory.
-#'   \item \code{best_trajectory}: character scalar with the name of the
-#'         highest-scoring trajectory (or \code{NA} if none valid).
-#'   \item \code{n_trajectories}: integer count.
-#'   \item \code{method_info}: list of key settings used.
-#' }
-#'
-#' @seealso [compute_single_DOPE_linear()], plotting helpers like
-#'   \code{plot.multi_dope_results()}.
-#'
-#' @examples
-#' \dontrun{
-#' # expr: genes x cells matrix; pt1, pt2: numeric pseudotime vectors (length = ncol(expr))
-#' res <- compute_multi_DOPE_linear(
-#'   expr_or_seurat = expr,
-#'   pseudotime_list = list(linear_a = pt1, linear_b = pt2),
-#'   naive_markers = c("TCF7","LEF1"),
-#'   terminal_markers = c("GZMB","PRF1"),
-#'   E_method = "combined",
-#'   parallel = TRUE
-#' )
-#' res$comparison_summary
-#' res$best_trajectory
-#' }
-#'
-#' @export
-compute_multi_DOPE_linear <- function(expr_or_seurat,
-                                      pseudotime_list,
-                                      naive_markers,
-                                      terminal_markers,
-                                      cluster_labels = NULL,
-                                      naive_clusters = NULL,
-                                      terminal_clusters = NULL,
-                                      pathways = NULL,
-                                      gene_sets = NULL,
-                                      E_method = c("gmm", "clusters", "combined"),
-                                      id_type = c("SYMBOL", "ENSEMBL", "ENTREZID"),
-                                      species = "Homo sapiens",
-                                      assay = NULL,
-                                      slot = "data",
-                                      min_remaining = 10,
-                                      min_fraction = 0.20,
-                                      min_genes_per_module = 3,
-                                      plot_E = TRUE,
-                                      verbose = TRUE,
-                                      parallel = FALSE,
-                                      n_cores = NULL,
-                                      drop_unused_levels = TRUE,
-                                      tol = 1e-8) {
+plot.multi_dope_results_branched <- function(multi_dope_branched,
+                                             scope = c("branch","overall"),
+                                             metrics = c("D_naive","D_term","O","P","E_naive","E_term","DOPE_score"),
+                                             type = c("bar","heatmap","radar"),
+                                             branch_mode = c("facet","stack","separate"),
+                                             branches = NULL) {
+  scope       <- match.arg(scope)
+  type        <- match.arg(type)
+  branch_mode <- match.arg(branch_mode)
 
-  E_method <- match.arg(E_method)
-  id_type  <- match.arg(id_type)
+  # -------- Dependencies --------
+  if (!requireNamespace("ggplot2", quietly = TRUE)) stop("ggplot2 required")
+  if (type %in% c("bar","heatmap") && !requireNamespace("reshape2", quietly = TRUE))
+    stop("reshape2 required for long data (install.packages('reshape2'))")
+  if (type == "radar" && !requireNamespace("fmsb", quietly = TRUE))
+    stop("fmsb required for radar (install.packages('fmsb'))")
+  if (type == "radar" && !requireNamespace("scales", quietly = TRUE))
+    stop("scales required for radar (install.packages('scales'))")
 
-  if (!is.list(pseudotime_list)) stop("pseudotime_list must be a list of pseudotime vectors")
-  if (is.null(names(pseudotime_list))) names(pseudotime_list) <- paste0("trajectory_", seq_along(pseudotime_list))
-  n_trajectories <- length(pseudotime_list)
-
-  if (verbose) {
-    cat("Computing DOPE metrics for", n_trajectories, "linear trajectories...\n")
-    cat("==========================================================\n")
+  `%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
+  num1 <- function(x) {
+    if (is.null(x)) return(NA_real_)
+    if (is.list(x)) x <- unlist(x, use.names = FALSE)
+    x <- suppressWarnings(as.numeric(x))
+    x <- x[is.finite(x)]
+    if (length(x)) x[1] else NA_real_
   }
 
-  # Set up parallel
-  use_parallel <- FALSE
-  if (parallel && n_trajectories > 1) {
-    if (!requireNamespace("parallel", quietly = TRUE)) {
-      warning("parallel package not available, running sequentially")
-    } else {
-      if (is.null(n_cores)) n_cores <- max(1, parallel::detectCores() - 1)
-      if (verbose) cat("Using", n_cores, "cores for parallel processing\n")
-      use_parallel <- TRUE
+  # extractor supports common nested fields inside each branch object
+  extract_metric <- function(obj, m) {
+    if (is.null(obj)) return(NA_real_)
+    switch(m,
+           "D_naive"   = num1(obj$D$D_naive %||% obj$D_naive %||% obj$D$naive),
+           "D_term"    = num1(obj$D$D_term  %||% obj$D_term  %||% obj$D$terminal),
+           "O"         = num1(obj$O$O       %||% obj$O),
+           "P"         = num1(obj$P$P       %||% obj$P),
+           "E_naive"   = num1(obj$E$E_naive %||% obj$E_naive %||% obj$E$naive),
+           "E_term"    = num1(obj$E$E_term  %||% obj$E_term  %||% obj$E$terminal),
+           "DOPE_score"= num1(obj$DOPE_score %||% obj$DOPE %||% obj$score),
+           # fallback: try direct name
+           num1(obj[[m]])
+    )
+  }
+
+  # -------- Build tidy data --------
+  if (scope == "overall") {
+    # Use the aggregate DOPE by trajectory (mirrors your non-branched plot logic)
+    plot_data <- multi_dope_branched$comparison_overall
+    if (is.null(plot_data) || !nrow(plot_data)) stop("No overall comparison data found.")
+    # Permit plotting a single metric: rename to DOPE_score to reuse code paths
+    names(plot_data)[names(plot_data) == "aggregate_DOPE"] <- "DOPE_score"
+    metrics <- intersect(metrics, names(plot_data))
+    if (!length(metrics)) metrics <- "DOPE_score"
+
+    if (type == "bar") {
+      long <- reshape2::melt(plot_data[, c("trajectory", metrics), drop = FALSE],
+                             id.vars = "trajectory", variable.name = "metric", value.name = "score")
+      p <- ggplot2::ggplot(long, ggplot2::aes(x = trajectory, y = score, fill = metric)) +
+        ggplot2::geom_col(position = "dodge", na.rm = TRUE) +
+        ggplot2::theme_minimal() +
+        ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
+        ggplot2::labs(title = "Aggregate DOPE Across Trajectories",
+                      x = "Trajectory", y = "Score") +
+        ggplot2::coord_cartesian(ylim = c(0, 1))
+      return(p)
     }
-  }
 
-  compute_single_DOPE_linear <- function(trajectory_name, pseudotime_vector) {
-    if (verbose) cat("\n--- Processing trajectory:", trajectory_name, "---\n")
-    tryCatch({
-      res <- compute_single_DOPE_linear(
-        expr_or_seurat   = expr_or_seurat,
-        pseudotime       = pseudotime_vector,
-        naive_markers    = naive_markers,
-        terminal_markers = terminal_markers,
-        cluster_labels   = cluster_labels,
-        naive_clusters   = naive_clusters,
-        terminal_clusters = terminal_clusters,
-        pathways         = pathways,
-        gene_sets        = gene_sets,
-        E_method         = E_method,
-        id_type          = id_type,
-        species          = species,
-        assay            = assay,
-        slot             = slot,
-        min_remaining    = min_remaining,
-        min_fraction     = min_fraction,
-        min_genes_per_module = min_genes_per_module,
-        plot_E           = plot_E,
-        verbose          = verbose,
-        tol              = tol
-      )
-      res$trajectory_name <- trajectory_name
-      res
-    }, error = function(e) {
-      warning(paste("Error processing trajectory", trajectory_name, ":", e$message))
-      list(
-        trajectory_name = trajectory_name,
-        D = list(D_naive = NA, D_term = NA),
-        O = list(O = NA),
-        P = list(P = NA),
-        E = list(E_naive = NA, E_term = NA, E_comp = NA),
-        DOPE_score = NA,
-        errors = list(D_error = e$message, O_error = e$message, P_error = e$message, E_error = e$message)
-      )
-    })
-  }
+    if (type == "heatmap") {
+      long <- reshape2::melt(plot_data[, c("trajectory", metrics), drop = FALSE],
+                             id.vars = "trajectory", variable.name = "metric", value.name = "score")
+      p <- ggplot2::ggplot(long, ggplot2::aes(x = metric, y = trajectory, fill = score)) +
+        ggplot2::geom_tile(color = "white", size = 0.5) +
+        ggplot2::scale_fill_gradient2(low = "red", mid = "yellow", high = "green",
+                                      midpoint = 0.5, name = "Score", na.value = "grey90") +
+        ggplot2::theme_minimal() +
+        ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
+                       plot.title = ggplot2::element_text(hjust = 0.5)) +
+        ggplot2::labs(title = "Aggregate DOPE Heatmap", x = "Metric", y = "Trajectory") +
+        ggplot2::geom_text(ggplot2::aes(label = ifelse(is.na(score), "NA", sprintf("%.2f", score))),
+                           color = "black", size = 3)
+      return(p)
+    }
 
-  if (use_parallel) {
-    cl <- parallel::makeCluster(n_cores)
-    on.exit(parallel::stopCluster(cl), add = TRUE)
-    parallel::clusterExport(
-      cl,
-      varlist = c("compute_single_DOPE_linear",
-                  "metrics_D","metrics_O","metrics_P","metrics_E",
-                  ".get_expr",".per_cell_score",".align_to_cells","subset_by_clusters","%||%", ".has_formal"),
-      envir = environment()
-    )
-    # If you need packages on workers, load them here:
-    # parallel::clusterEvalQ(cl, { library(Seurat) })
-
-    idxs <- seq_along(pseudotime_list)
-    trajectory_results <- parallel::parLapply(
-      cl, idxs,
-      function(i) {
-        nm <- names(pseudotime_list)[i]
-        compute_single_dope(nm, pseudotime_list[[i]])
-      }
-    )
-    names(trajectory_results) <- names(pseudotime_list)
+    if (type == "radar") {
+      rd <- plot_data[, metrics, drop = FALSE]
+      rd[is.na(rd)] <- 0
+      for (m in metrics) rd[[m]] <- pmax(0, pmin(1, rd[[m]]))
+      rd <- rbind(rep(1, length(metrics)), rep(0, length(metrics)), rd)
+      rownames(rd) <- c("Max","Min", plot_data$trajectory)
+      n <- nrow(plot_data)
+      fmsb::radarchart(rd, axistype = 1,
+                       pcol = seq_len(n),
+                       pfcol = scales::alpha(seq_len(n), 0.25),
+                       plwd = 2, plty = 1,
+                       cglcol = "grey", cglty = 1, axislabcol = "grey",
+                       cglwd = 0.5, vlcex = 0.8, title = "Aggregate DOPE Radar")
+      graphics::legend("topright", legend = plot_data$trajectory,
+                       col = seq_len(n), lty = 1, lwd = 2, bty = "n", cex = 0.8)
+      return(invisible(NULL))
+    }
   } else {
-    trajectory_results <- Map(compute_single_dope, names(pseudotime_list), pseudotime_list)
-    names(trajectory_results) <- names(pseudotime_list)
-  }
+    # scope == "branch": assemble [branch, trajectory, metrics...] from branch_data
+    bd <- multi_dope_branched$branch_data
+    if (is.null(bd) || !length(bd)) stop("No branch_data found.")
+    # choose branches to include
+    if (is.null(branches)) branches <- names(bd)
+    branches <- intersect(branches, names(bd))
+    if (!length(branches)) stop("No matching branches to plot.")
 
-  comparison_summary <- create_comparison_summary(trajectory_results)
+    rows <- list()
+    for (br in branches) {
+      tr_map <- bd[[br]]                 # trajectory -> branch_object
+      if (is.null(tr_map) || !length(tr_map)) next
+      for (traj in names(tr_map)) {
+        obj <- tr_map[[traj]]
+        vals <- setNames(numeric(length(metrics)), metrics)
+        for (m in metrics) vals[m] <- extract_metric(obj, m)
+        rows[[length(rows) + 1]] <- data.frame(
+          branch = br,
+          trajectory = traj,
+          as.list(vals),
+          check.names = FALSE,
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+    if (!length(rows)) stop("No branch rows assembled.")
+    plot_df <- do.call(rbind, rows)
+    # keep only present metrics
+    metrics <- intersect(metrics, setdiff(names(plot_df), c("branch","trajectory")))
+    if (!length(metrics)) stop("Requested metrics not found in branch results.")
 
-  valid_scores <- comparison_summary$DOPE_score[!is.na(comparison_summary$DOPE_score)]
-  best_trajectory <- if (length(valid_scores) > 0) {
-    comparison_summary$trajectory[which.max(comparison_summary$DOPE_score)]
-  } else NA_character_
+    # Label for stack mode
+    plot_df$traj_label <- paste0(plot_df$trajectory, " [", plot_df$branch, "]")
 
-  multi_results <- list(
-    results = trajectory_results,
-    comparison_summary = comparison_summary,
-    best_trajectory = best_trajectory,
-    n_trajectories = n_trajectories,
-    method_info = list(
-      E_method = E_method,
-      id_type = id_type,
-      species = species,
-      parallel = use_parallel,
-      n_cores = if (use_parallel) n_cores else NA_integer_
-    )
-  )
-  class(multi_results) <- "multi_dope_results"
+    if (type == "bar") {
+      long <- reshape2::melt(plot_df[, c("branch","trajectory","traj_label", metrics), drop = FALSE],
+                             id.vars = c("branch","trajectory","traj_label"),
+                             variable.name = "metric", value.name = "score")
+      # x label depends on branch_mode
+      x_var <- if (branch_mode == "stack") "traj_label" else "trajectory"
+      p <- ggplot2::ggplot(long, ggplot2::aes_string(x = x_var, y = "score", fill = "metric")) +
+        ggplot2::geom_col(position = "dodge", na.rm = TRUE) +
+        ggplot2::theme_minimal() +
+        ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
+        ggplot2::labs(title = "DOPE Metrics by Branch", x = "Trajectory", y = "Score") +
+        ggplot2::coord_cartesian(ylim = c(0, 1))
+      if (branch_mode == "facet") {
+        p <- p + ggplot2::facet_wrap(~ branch, scales = "free_x")
+      }
+      return(p)
+    }
 
-  if (verbose) {
-    cat("\n==========================================================\n")
-    cat("Multi-trajectory DOPE analysis (linear) complete!\n")
-    if (!is.na(best_trajectory)) {
-      best_score <- comparison_summary$DOPE_score[comparison_summary$trajectory == best_trajectory]
-      cat(sprintf("Best trajectory: %s (DOPE score: %.3f)\n", best_trajectory, best_score))
+    if (type == "heatmap") {
+      long <- reshape2::melt(plot_df[, c("branch","trajectory","traj_label", metrics), drop = FALSE],
+                             id.vars = c("branch","trajectory","traj_label"),
+                             variable.name = "metric", value.name = "score")
+      y_var <- if (branch_mode == "stack") "traj_label" else "trajectory"
+      p <- ggplot2::ggplot(long, ggplot2::aes_string(x = "metric", y = y_var, fill = "score")) +
+        ggplot2::geom_tile(color = "white", size = 0.5) +
+        ggplot2::scale_fill_gradient2(low = "red", mid = "yellow", high = "green",
+                                      midpoint = 0.5, name = "Score", na.value = "grey90") +
+        ggplot2::theme_minimal() +
+        ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
+                       plot.title = ggplot2::element_text(hjust = 0.5)) +
+        ggplot2::labs(title = "DOPE Metrics Heatmap (Branches)", x = "Metric", y = "Trajectory") +
+        ggplot2::geom_text(ggplot2::aes(label = ifelse(is.na(score), "NA", sprintf("%.2f", score))),
+                           color = "black", size = 3)
+      if (branch_mode == "facet") {
+        p <- p + ggplot2::facet_wrap(~ branch, scales = "free_y")
+      }
+      return(p)
+    }
+
+    if (type == "radar") {
+      # separate: one radar per branch; others: a single radar containing all rows
+      to_radar <- function(df_rows, title = "DOPE Metrics Radar") {
+        mat <- as.data.frame(df_rows[, metrics, drop = FALSE])
+        mat[is.na(mat)] <- 0
+        for (m in metrics) mat[[m]] <- pmax(0, pmin(1, mat[[m]]))
+        rad <- rbind(rep(1, length(metrics)), rep(0, length(metrics)), mat)
+        rownames(rad) <- c("Max","Min", rownames(df_rows))
+        n <- nrow(df_rows)
+        fmsb::radarchart(rad, axistype = 1,
+                         pcol = seq_len(n),
+                         pfcol = scales::alpha(seq_len(n), 0.25),
+                         plwd = 2, plty = 1,
+                         cglcol = "grey", cglty = 1, axislabcol = "grey",
+                         cglwd = 0.5, vlcex = 0.8, title = title)
+        graphics::legend("topright", legend = rownames(df_rows),
+                         col = seq_len(n), lty = 1, lwd = 2, bty = "n", cex = 0.8)
+      }
+
+      if (branch_mode == "separate") {
+        opar <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(opar))
+        brs <- unique(plot_df$branch)
+        n <- length(brs); nc <- ceiling(sqrt(n)); nr <- ceiling(n / nc)
+        graphics::par(mfrow = c(nr, nc), mar = c(1,1,2,1))
+        for (b in brs) {
+          dfb <- plot_df[plot_df$branch == b, c("trajectory", metrics), drop = FALSE]
+          rownames(dfb) <- dfb$trajectory
+          dfb$trajectory <- NULL
+          to_radar(dfb, title = paste("Branch:", b))
+        }
+        return(invisible(NULL))
+      } else {
+        # one radar: rows are either trajectory or trajectory [branch]
+        df <- plot_df[, c(if (branch_mode == "stack") "traj_label" else "trajectory", metrics), drop = FALSE]
+        rownames(df) <- df[[if (branch_mode == "stack") "traj_label" else "trajectory"]]
+        df[[if (branch_mode == "stack") "traj_label" else "trajectory"]] <- NULL
+        to_radar(df, title = "DOPE Metrics Radar (Branches)")
+        return(invisible(NULL))
+      }
     }
   }
+
+  stop("Unknown configuration.")
 }

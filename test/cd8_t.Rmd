@@ -88,4 +88,10 @@ res<- compute_multi_DOPE_linear(expr,
                           terminal_markers =term,
                           pathways = c("hsa04660","hsa04640"))
 ```
+```{r}
+plot.multi_dope_results(res, type = "bar")
+```
+```{r}
+plot.multi_dope_results(res, type = "radar")
+```
 
