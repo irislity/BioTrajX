@@ -15,7 +15,7 @@ branched analyses, cells can be subset using cluster labels before metric comput
 BioTrajX provides tools to assess pseudotime and trajectory inference outputs
 using biologically grounded expectations. It implements the DOPE metrics
 (Directionality, Order Consistency, Program Coherence, Endpoint Validity),
-includes toy datasets for testing, and plotting utilities for visualization.
+includes plotting utilities for visualization.
 }
 \section{\subsection{Main Functions}{
 }{

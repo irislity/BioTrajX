@@ -164,6 +164,7 @@ res_multi <- compute_multi_DOPE_branched(
   verbose = TRUE
 )
 ```
+
 ```{r}
 plot.multi_dope_results (res_multi, type="bar")
 ```

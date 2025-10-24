@@ -66,9 +66,6 @@ density plots when using the GMM mode (default \code{TRUE}).}
 \item{verbose}{Logical; if \code{TRUE}, print diagnostic messages when component
 metrics fail and are caught (default \code{FALSE}).}
 
-\item{trajectory}{Either \code{"linear"} or \code{"branched"}. When \code{"branched"},
-the input is subset to a branch before scoring (see branch arguments).}
-
 \item{drop_unused_levels}{Logical; if \code{TRUE}, drop unused factor levels in
 the subsetted cluster labels (default \code{TRUE}).}
 
@@ -124,7 +121,7 @@ package must be installed and the requested assay/slot must exist.
 \examples{
 \dontrun{
 
-res <- compute_DOPE_single(
+res <- compute_single_DOPE_linear(
   expr_or_seurat   = expr,
   pseudotime       = pt,
   naive_markers    = naive,

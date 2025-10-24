@@ -1,6 +1,5 @@
 ---
 title: "R Notebook"
-
 ---
 ```{r}
 setwd("C:/Users/iris9/BioTrajX")
@@ -10,6 +9,12 @@ devtools::load_all()
 ```{r}
 library(Seurat)
 seu <- readRDS("C:/Users/iris9/Desktop/bone_marrow_10X_pseudotime.rds")
+
+
+DimPlot(seu, group.by = "Phenotype")
+FeaturePlot(seu, features="monocle3_pseudotime")
+FeaturePlot(seu, features="slingshot_pt_single")
+FeaturePlot(seu, features="CytoTRACE")
 ```
 
 ```{r}
@@ -125,7 +130,7 @@ plot.multi_dope_results_branched(res, scope = "overall", type = "bar")
 
 # 2) Per-branch bar plot, faceted by branch
 plot.multi_dope_results_branched(res, scope = "branch",
-                                 metrics = c("D_naive","D_term","O","P","DOPE_score"),
+                                 metrics = c("D_naive","D_term","O","P","E_naive", "E_term","DOPE_score"),
                                  type = "bar", branch_mode = "facet")
 
 # 3) Per-branch heatmap with stacked labels "trajectory [branch]"
@@ -138,4 +143,5 @@ plot.multi_dope_results_branched(res, scope = "branch",
 
 
 ```
+
 

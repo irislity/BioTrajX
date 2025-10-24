@@ -51,8 +51,6 @@
 #'   metrics fail and are caught (default `FALSE`).
 #' @param drop_unused_levels Logical; if `TRUE`, drop unused factor levels in
 #'   the subsetted cluster labels (default `TRUE`).
-#' @param tol Numeric tolerance forwarded to `metrics_O()` when that function
-#'   supports a `tol` argument (default `1e-8`).
 #'
 #' @details
 #' The wrapper:
@@ -60,8 +58,7 @@
 #'   \item Aligns `pseudotime` (and `cluster_labels` when provided) to the
 #'         current cell order.
 #'   \item Optionally subsets to a specified branch for `"branched"` trajectories.
-#'   \item Computes D via `metrics_D()`, O via `metrics_O()` (passing `tol`
-#'         when supported), P via `metrics_P()` (using `pathways`/`gene_sets`),
+#'   \item Computes D via `metrics_D()`, O via `metrics_O()` , P via `metrics_P()` (using `pathways`/`gene_sets`),
 #'         and E via `metrics_E()` (controlled by `E_method`, `plot_E`, and
 #'         optional cluster specification).
 #'   \item Aggregates a scalar `DOPE_score` as the mean of available component
@@ -230,8 +227,7 @@ compute_single_DOPE_linear <- function(expr_or_seurat,
                                        branch_include = NULL,
                                        branch_exclude = NULL,
                                        branch_min_cells = 10,
-                                       drop_unused_levels = TRUE,
-                                       tol = 1e-8) {
+                                       drop_unused_levels = TRUE) {
   E_method   <- match.arg(E_method)
   id_type    <- match.arg(id_type)
 
@@ -267,7 +263,7 @@ compute_single_DOPE_linear <- function(expr_or_seurat,
   naive_scores <- .per_cell_score(expr, naive_markers)
   term_scores  <- .per_cell_score(expr, terminal_markers)
 
-  # ---- O metric (conditionally pass tol)
+  # ---- O metric
   O_res <- tryCatch({
     if (.has_formal(metrics_O, "tol")) {
       metrics_O(expr, naive_markers, terminal_markers, pseudotime, tol = tol)
@@ -278,27 +274,21 @@ compute_single_DOPE_linear <- function(expr_or_seurat,
     if (verbose) message("O metric failed: ", e$message)
     list(O = NA_real_, error = e$message)
   })
-
   # ---- P metric
-  P_res <- tryCatch({
-    metrics_P(expr,
-              pseudotime,
-              pathways = pathways,
-              gene_sets = gene_sets,
-              naive_markers = naive_markers,
-              terminal_markers = terminal_markers,
-              id_type = id_type,
-              species = species,
-              assay = assay,
-              slot = slot,
-              min_remaining = min_remaining,
-              min_fraction = min_fraction,
-              min_genes_per_module = min_genes_per_module,
-              verbose = verbose)
-  }, error = function(e) {
-    if (verbose) message("P metric failed: ", e$message)
-    list(P = NA_real_, error = e$message)
-  })
+  P_res <- P_res <- tryCatch({
+    metric_P(
+      module_score   = sub$expr,       # or sub$module_score depending on structure
+      pseudotime     = sub$pt,
+      threshold      = "quantile",     # or "mean_sd"
+      q              = 0.8,
+      alpha          = 0.5,
+      soft_sigma     = "mad",
+      k_sigma        = 1.0,
+      M              = 500,
+      n_bins         = 10,
+      seed           = 1L
+    )
+  }, error = function(e) list(P = NA_real_, error = e$message))
 
   # ---- E metric
   E_res <- tryCatch({
@@ -583,8 +573,7 @@ compute_multi_DOPE_linear <- function(
           branch_include   = branch_include,
           branch_exclude   = branch_exclude,
           branch_min_cells = branch_min_cells,
-          drop_unused_levels = drop_unused_levels,
-          tol              = tol
+          drop_unused_levels = drop_unused_levels
         )
         res$trajectory_name <- trajectory_name
         res

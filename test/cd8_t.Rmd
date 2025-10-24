@@ -19,6 +19,14 @@ cluster <- seu$functional.cluster
 ```
 
 ```{r}
+DimPlot(seu, group.by = "functional.cluster")
+FeaturePlot(seu, features="monocle3_pseudotime")
+FeaturePlot(seu, features="slingshot_pseudotime")
+FeaturePlot(seu, features="cytotrace_score")
+```
+
+
+```{r}
 D <- metrics_D(expr, naive_markers = naive, terminal_markers = term, seu$monocle3_pseudotime)
 
 
@@ -52,21 +60,7 @@ E <- metrics_E(seu$monocle3_pseudotime,
               method = c("gmm"))
 plot_metrics_E(E)            
 ```
-```{r}
-compute_DOPE_single(seu,
-                    seu$cytotrace_score,
-                    naive_markers = naive,
-                    terminal_markers = term, 
-                    pathways = c("hsa04660","hsa04640"))
-```
 
-```{r}
-compute_DOPE_single(seu,
-                    seu$monocle3_pseudotime,
-                    naive_markers = naive,
-                    terminal_markers = term, 
-                    pathways = c("hsa04660","hsa04640"))
-```
 
 ```{r}
 res_single <- compute_single_DOPE_linear(seu,

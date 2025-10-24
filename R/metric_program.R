@@ -1,43 +1,139 @@
-#' P metric: Program coherence along pseudotime (species-aware, fixed for KEGG mapping)
-#'
-#' @description
-#' Compute the Program (P) metric by fitting GAMs of module (gene set) z-scores
-#' against pseudotime and aggregating explained variance (R^2) across modules.
-#' Gene sets can come from user input (`gene_sets`) or from MSigDB KEGG via
-#' `msigdbr` given `pathways`. Supports Seurat or matrix input. Species-aware
-#' ID mapping via the appropriate Bioconductor OrgDb.
-#'
-#' @param expr_or_seurat Matrix (genes x cells) **or** a Seurat object.
-#' @param pseudotime Numeric vector (length = #cells).
-#' @param pathways Character vector of KEGG queries (e.g. "mmu04640").
-#' @param gene_sets Named list of character vectors (modules).
-#' @param naive_markers,terminal_markers Character vectors of marker IDs to exclude.
-#' @param id_type One of c("SYMBOL","ENSEMBL","ENTREZID").
-#' @param species Species common name (e.g., "Mus musculus").
-#' @param assay,slot Seurat assay/slot.
-#' @param min_remaining,min_fraction,min_genes_per_module Filtering controls.
-#' @param verbose Logical.
-#'
-#' @return List with P metric results.
-metrics_P <- function(expr_or_seurat,
-                      pseudotime,
-                      pathways = NULL,
-                      gene_sets = NULL,
-                      naive_markers = character(0),
-                      terminal_markers = character(0),
-                      id_type = c("SYMBOL","ENSEMBL","ENTREZID"),
-                      species = "Homo sapiens",
-                      assay = NULL,
-                      slot  = "data",
-                      min_remaining = 10,
-                      min_fraction  = 0.20,
-                      min_genes_per_module = 3,
-                      verbose = TRUE) {
 
+
+
+.metric_P_core <- function(module_score, pseudotime,
+                           threshold = c("quantile","mean_sd"),
+                           q = 0.8, alpha = 0.5,
+                           soft_sigma = c("mad","sd"), k_sigma = 1.0,
+                           M = 500, n_bins = 10, seed = 1L) {
+  stopifnot(length(module_score) == length(pseudotime))
+  set.seed(seed)
+  N <- length(module_score)
+  o <- order(pseudotime)
+  s <- module_score[o]
+  t <- pseudotime[o]
+
+  threshold  <- match.arg(threshold)
+  soft_sigma <- match.arg(soft_sigma)
+
+  # (optional) safety: accept q in 0–1 or 1–100
+  if (q > 1) q <- q/100
+  if (q <= 0 || q >= 1) stop("'q' must be in (0,1).")
+
+  if (threshold == "quantile") {
+    tau <- as.numeric(quantile(s, q, na.rm = TRUE))
+  } else {
+    tau <- mean(s, na.rm = TRUE) + alpha*sd(s, na.rm = TRUE)
+  }
+
+  y <- ifelse(s >= tau, 1L, -1L)
+  sig <- if (soft_sigma == "mad") mad(s) else sd(s)
+  if (!is.finite(sig) || sig == 0) sig <- 1e-6
+  z <- tanh(k_sigma * (s - tau) / sig)
+
+  e_hard <- ifelse(y[-N] == 1 & y[-1] == 1, 1, -1)
+  C_hard <- mean(e_hard)
+  e_soft <- z[-N] * z[-1]
+  C_soft <- mean(e_soft)
+
+  if (any(y == 1)) var_pos <- stats::var(t[y == 1]) else var_pos <- stats::var(t) * 1e6
+  var_all <- stats::var(t)
+  T_var <- 1 - (var_pos / var_all)
+  T_var <- max(0, min(1, T_var))
+
+  runs <- rle(y)
+  idx <- cumsum(runs$lengths)
+  start_idx <- c(1, head(idx, -1) + 1)
+  end_idx <- idx
+  pos_runs <- which(runs$values == 1)
+  if (length(pos_runs) > 0) {
+    spans <- mapply(function(si, ei) t[ei] - t[si], start_idx[pos_runs], end_idx[pos_runs])
+    sizes <- runs$lengths[pos_runs]
+    Dbar <- sum(sizes * spans) / sum(sizes)
+  } else {
+    Dbar <- max(t) - min(t)
+  }
+
+  Tall <- max(t) - min(t)
+  if (Tall == 0) Tall <- 1e-6
+  T_run <- 1 - (Dbar / Tall)
+  T_run <- max(0, min(1, T_run))
+  T_peak <- (T_var + T_run)/2
+
+  bin_id <- cut(t,
+                breaks = quantile(t, probs = seq(0,1,length.out=n_bins+1),
+                                  na.rm = TRUE, type = 7),
+                include.lowest = TRUE, labels = FALSE)
+
+  sim_stats <- replicate(M, {
+    s_sim <- s
+    for (b in seq_len(n_bins)) {
+      ii <- which(bin_id == b)
+      if (length(ii) > 1) s_sim[ii] <- sample(s_sim[ii], length(ii), replace = FALSE)
+    }
+    y_sim <- ifelse(s_sim >= tau, 1L, -1L)
+    z_sim <- tanh(k_sigma * (s_sim - tau) / sig)
+    C_hard_sim <- mean(ifelse(y_sim[-N] == 1 & y_sim[-1] == 1, 1, -1))
+    C_soft_sim <- mean(z_sim[-N] * z_sim[-1])
+    if (any(y_sim == 1)) var_pos_sim <- stats::var(t[y_sim == 1]) else var_pos_sim <- var_all * 1e6
+    T_var_sim <- 1 - (var_pos_sim / var_all)
+    T_var_sim <- max(0, min(1, T_var_sim))
+
+    runs_sim <- rle(y_sim)
+    idx_sim <- cumsum(runs_sim$lengths)
+    start_idx_sim <- c(1, head(idx_sim, -1) + 1)
+    end_idx_sim <- idx_sim
+    pos_runs_sim <- which(runs_sim$values == 1)
+    if (length(pos_runs_sim) > 0) {
+      spans_sim <- mapply(function(si, ei) t[ei] - t[si], start_idx_sim[pos_runs_sim], end_idx_sim[pos_runs_sim])
+      sizes_sim <- runs_sim$lengths[pos_runs_sim]
+      Dbar_sim <- sum(sizes_sim * spans_sim) / sum(sizes_sim)
+    } else {
+      Dbar_sim <- Tall
+    }
+    T_run_sim <- 1 - (Dbar_sim / Tall)
+    T_run_sim <- max(0, min(1, T_run_sim))
+    T_peak_sim <- (T_var_sim + T_run_sim)/2
+    c(C_hard_sim = C_hard_sim, C_soft_sim = C_soft_sim, T_peak_sim = T_peak_sim)
+  })
+
+  C_hard_null <- sim_stats["C_hard_sim",]
+  C_soft_null <- sim_stats["C_soft_sim",]
+  T_peak_null <- sim_stats["T_peak_sim",]
+
+  Pc_hard <- mean(C_hard_null <= C_hard)
+  Pc_soft <- mean(C_soft_null <= C_soft)
+  Pt      <- mean(T_peak_null <= T_peak)
+
+  p_C_hard <- mean(C_hard_null >= C_hard)
+  p_C_soft <- mean(C_soft_null >= C_soft)
+  p_T      <- mean(T_peak_null >= T_peak)
+
+  P_final <- mean(c(Pc_soft, Pt))
+
+  list(
+    threshold = tau,
+    C_hard = C_hard, C_soft = C_soft, T_var = T_var, T_run = T_run, T_peak = T_peak,
+    null = list(C_hard = C_hard_null, C_soft = C_soft_null, T_peak = T_peak_null),
+    percentiles = c(Pc_hard = Pc_hard, Pc_soft = Pc_soft, Pt = Pt),
+    p_values = c(p_C_hard = p_C_hard, p_C_soft = p_C_soft, p_T = p_T),
+    P = P_final
+  )
+}
+
+
+#=====
+.get_kegg_module_scores <- function(expr_or_seurat,
+                                    pathways,
+                                    naive_markers = character(0),
+                                    terminal_markers = character(0),
+                                    id_type = c("SYMBOL","ENSEMBL","ENTREZID"),
+                                    species = "Homo sapiens",
+                                    assay = NULL,
+                                    slot = "data") {
   id_type <- match.arg(id_type)
-  .msg <- function(...) if (isTRUE(verbose)) message(sprintf(...))
 
-  ## ---------- expression as matrix ----------
+  ## --- Expression as matrix ---
   .as_matrix <- function(x) {
     if (inherits(x, "Seurat")) {
       a <- if (is.null(assay)) Seurat::DefaultAssay(x) else assay
@@ -49,7 +145,7 @@ metrics_P <- function(expr_or_seurat,
     }
   }
 
-  ## ---------- species → OrgDb resolver ----------
+  ## --- Species → OrgDb resolver ---
   .org_pkg_for_species <- function(species) {
     sp <- tolower(trimws(species))
     aliases <- list(
@@ -60,15 +156,13 @@ metrics_P <- function(expr_or_seurat,
     aliases[[sp]]
   }
 
-  ## ---------- ID mapping helper ----------
+  ## --- ID mapping ---
   .map_ids <- function(symbols, to, species) {
     sy <- unique(symbols)
     if (to == "SYMBOL") return(sy)
-
     pkg <- .org_pkg_for_species(species)
     if (is.null(pkg)) stop(sprintf("No OrgDb mapping for %s", species))
     OrgDb <- getExportedValue(pkg, pkg)
-
     res <- AnnotationDbi::select(OrgDb,
                                  keys = sy,
                                  keytype = "SYMBOL",
@@ -76,48 +170,32 @@ metrics_P <- function(expr_or_seurat,
     unique(stats::na.omit(res[[to]]))
   }
 
-  ## ---------- KEGG from msigdbr ----------
+  ## --- Get KEGG pathway genes ---
   .get_kegg_ids <- function(query, species, id_type) {
     tbl <- msigdbr::msigdbr(species = species,
                             category = "C2",
                             subcategory = "CP:KEGG")
-    if (nrow(tbl) == 0L) {
-      stop(sprintf("No KEGG sets found for species '%s'.", species))
-    }
-
+    if (nrow(tbl) == 0L) stop(sprintf("No KEGG sets for '%s'.", species))
     q <- toupper(query)
-
-    # Case 1: numeric KEGG code (e.g. "04640")
     if (grepl("^\\d+$", q)) {
       code <- paste0("HSA", q)
-      tbl <- tbl[tolower(tbl$gs_exact_source) == tolower(code), , drop = FALSE]
-
-      # Case 2: organism-prefixed KEGG code (mmu04640, hsa04640, dre04640...)
+      tbl <- tbl[tolower(tbl$gs_exact_source) == tolower(code), ]
     } else if (grepl("^[A-Z]{3}\\d+$", q)) {
-      code <- sub("^[A-Z]{3}", "HSA", q)  # force to HSA#####
-      tbl <- tbl[tolower(tbl$gs_exact_source) == tolower(code), , drop = FALSE]
-
-      # Case 3: KEGG_ style (KEGG_HEMATOPOIETIC_CELL_LINEAGE)
+      code <- sub("^[A-Z]{3}", "HSA", q)
+      tbl <- tbl[tolower(tbl$gs_exact_source) == tolower(code), ]
     } else if (grepl("^KEGG_", q)) {
-      tbl <- tbl[tbl$gs_name == q, , drop = FALSE]
-
-      # Case 4: Plain text pathway name (e.g. "Hematopoietic cell lineage")
+      tbl <- tbl[tbl$gs_name == q, ]
     } else {
-      q <- gsub("[^A-Z0-9]", "_", q)   # normalize spaces → underscores
+      q <- gsub("[^A-Z0-9]", "_", q)
       q <- paste0("KEGG_", q)
-      tbl <- tbl[grepl(q, tbl$gs_name, fixed = TRUE), , drop = FALSE]
+      tbl <- tbl[grepl(q, tbl$gs_name, fixed = TRUE), ]
     }
-
-    if (nrow(tbl) == 0L) {
-      return(character(0))
-    }
-
+    if (nrow(tbl) == 0L) return(character(0))
     syms <- unique(tbl$gene_symbol)
     .map_ids(syms, to = id_type, species = species)
   }
 
-
-  ## ---------- utilities ----------
+  ## --- Helpers ---
   .remove_overlaps <- function(genes, naive, terminal) {
     setdiff(unique(genes), unique(c(naive, terminal)))
   }
@@ -137,226 +215,136 @@ metrics_P <- function(expr_or_seurat,
     colnames(sc) <- mods
     t(sc)
   }
-  .fit_gams <- function(Z_mod_by_cell, tvec) {
-    lapply(seq_len(nrow(Z_mod_by_cell)), function(i) {
-      z <- Z_mod_by_cell[i, ]
-      if (all(is.na(z))) return(NULL)
-      mgcv::gam(z ~ s(tvec), method = "REML")
-    })
-  }
-  .extract_R2 <- function(fits) {
-    vapply(fits, function(f) {
-      if (is.null(f)) return(NA_real_)
-      s <- summary(f)
-      if (!is.null(s$r.sq)) s$r.sq else if (!is.null(s$dev.expl)) s$dev.expl else NA_real_
-    }, numeric(1))
-  }
 
-  ## ---------- 1) load expression ----------
+  ## --- main ---
   mat <- .as_matrix(expr_or_seurat)
-  if (is.null(colnames(mat))) colnames(mat) <- paste0("cell_", seq_len(ncol(mat)))
-
-  if (!is.null(names(pseudotime))) {
-    common <- intersect(colnames(mat), names(pseudotime))
-    mat <- mat[, common, drop = FALSE]
-    tvec <- as.numeric(pseudotime[common])
-  } else {
-    tvec <- as.numeric(pseudotime)
-  }
-
-  ## ---------- 2) build gene sets ----------
   used_sets <- list()
-  if (!is.null(gene_sets)) {
-    used_sets <- gene_sets
-  } else {
-    for (q in pathways) {
-      ids <- .get_kegg_ids(q, species, id_type)
-      ids2 <- .remove_overlaps(ids, naive_markers, terminal_markers)
-      used_sets[[q]] <- ids2
-      if (length(ids2) == 0L) .msg("No KEGG genes for '%s' (species=%s)", q, species)
-    }
+  for (q in pathways) {
+    ids <- .get_kegg_ids(q, species, id_type)
+    ids2 <- .remove_overlaps(ids, naive_markers, terminal_markers)
+    used_sets[[q]] <- ids2
   }
-  if (length(used_sets) == 0L) stop("No usable gene sets (all empty).")
 
-  ## ---------- 3) drop tiny modules ----------
-  present_counts <- vapply(used_sets, function(g)
-    length(intersect(g, rownames(mat))), integer(1))
-  kept <- names(present_counts)[present_counts >= min_genes_per_module]
-  used_sets_kept <- used_sets[kept]
-
-  ## ---------- 4) scores + GAM ----------
   mat_z <- .row_z(mat)
-  Z_mod_by_cell <- .module_scores(mat_z, used_sets_kept)
-  fits <- .fit_gams(Z_mod_by_cell, tvec)
-  R2 <- .extract_R2(fits)
-  names(R2) <- rownames(Z_mod_by_cell)
-
-  P <- mean(R2, na.rm = TRUE)
-
-  smry <- tibble::tibble(
-    module = names(used_sets),
-    n_genes_declared = vapply(used_sets, length, integer(1)),
-    n_genes_present  = present_counts,
-    kept             = names(used_sets) %in% kept
-  )
-
-  list(P = P, R2 = R2, modules_used = kept,
-       modules_dropped = setdiff(names(used_sets), kept),
-       sets_used = used_sets_kept, summary = smry)
+  scores <- .module_scores(mat_z, used_sets)
+  list(scores = scores, gene_sets = used_sets)
 }
 
-#' Plot Program coherence (P): R^2 distribution + module GAM fits
-#'
-#' @param expr_or_seurat Matrix (genes x cells) or Seurat object (same as metrics_P)
-#' @param pseudotime numeric vector of length = #cells (same as metrics_P)
-#' @param P_res list returned by metrics_P()
-#' @param top_n integer, number of top-R2 modules to show on the right panel
-#' @param point_cex numeric, point size for dots (right panel)
-#' @param point_alpha numeric in [0,1], transparency for dots (right panel)
-#' @param line_lwd numeric, line width for GAM curves
-#' @param main global title
-#' @param assay,slot Seurat params (only used if expr_or_seurat is Seurat)
-#'
-#' @details
-#' Left panel: histogram of per-module R2; vertical dashed line = mean (global P).
-#' Right panel: for top_n modules by R2, show per-cell module z-scores (dots)
-#' against pseudotime with the GAM-predicted curve overlaid.
-#'
-#' @export
-plot_metrics_P <- function(expr_or_seurat,
-                           pseudotime,
-                           P_res,
-                           top_n       = 6,
-                           point_cex   = 0.4,
-                           point_alpha = 0.35,
-                           line_lwd    = 2,
-                           main        = "Program coherence (P) score",
-                           assay       = NULL,
-                           slot        = "data") {
+# ===
 
-  stopifnot(is.list(P_res), !is.null(P_res$R2), !is.null(P_res$sets_used))
+metrics_P <- function(expr_or_seurat,
+                      pseudotime,
+                      pathways,
+                      naive_markers = character(0),
+                      terminal_markers = character(0),
+                      id_type = c("SYMBOL","ENSEMBL","ENTREZID"),
+                      species = "Homo sapiens",
+                      assay = NULL,
+                      slot = "data",
+                      verbose = TRUE,
+                      ...) {
+  id_type <- match.arg(id_type)
+  .msg <- function(...) if (isTRUE(verbose)) message(sprintf(...))
 
-  ## ---------- helpers ----------
-  .as_matrix <- function(x) {
-    if (inherits(x, "Seurat")) {
-      a <- if (is.null(assay)) Seurat::DefaultAssay(x) else assay
-      Seurat::GetAssayData(x, assay = a, slot = slot)
-    } else {
-      m <- as.matrix(x)
-      if (is.null(rownames(m))) stop("Expression matrix must have gene rownames.")
-      m
-    }
-  }
-  .row_z <- function(mat) {
-    mu <- rowMeans(mat)
-    sd <- sqrt(rowMeans((mat - mu)^2))
-    sd[!is.finite(sd) | sd == 0] <- 1
-    sweep(mat, 1, mu, "-") / sd
-  }
-  .module_scores <- function(mat_z, gene_sets_named) {
-    mods <- names(gene_sets_named)
-    sc <- vapply(seq_along(gene_sets_named), function(j) {
-      g <- intersect(gene_sets_named[[j]], rownames(mat_z))
-      if (length(g) == 0L) return(rep(NA_real_, ncol(mat_z)))
-      colMeans(mat_z[g, , drop = FALSE])
-    }, FUN.VALUE = numeric(ncol(mat_z)))
-    colnames(sc) <- mods
-    t(sc)  # modules x cells
-  }
-  ac <- function(col, alpha) grDevices::adjustcolor(col, alpha.f = alpha)
+  ## 1. Get KEGG module scores
+  res <- .get_kegg_module_scores(expr_or_seurat = expr_or_seurat,
+                                 pathways       = pathways,
+                                 naive_markers  = naive_markers,
+                                 terminal_markers = terminal_markers,
+                                 id_type        = id_type,
+                                 species        = species,
+                                 assay          = assay,
+                                 slot           = slot)
 
-  ## ---------- data alignment ----------
-  mat <- .as_matrix(expr_or_seurat)
-  if (is.null(colnames(mat))) colnames(mat) <- paste0("cell_", seq_len(ncol(mat)))
+  module_scores <- res$scores
+  gene_sets     <- res$gene_sets
 
+  ## 2. Align pseudotime
   if (!is.null(names(pseudotime))) {
-    common <- intersect(colnames(mat), names(pseudotime))
-    mat <- mat[, common, drop = FALSE]
-    tvec <- as.numeric(pseudotime[common])
-  } else {
-    tvec <- as.numeric(pseudotime)
+    common <- intersect(colnames(module_scores), names(pseudotime))
+    pseudotime <- pseudotime[common]
+    module_scores <- module_scores[, common, drop = FALSE]
   }
 
-  ## ---------- module scores for the modules actually used ----------
-  used_sets <- P_res$sets_used
-  if (length(used_sets) == 0L) stop("P_res$sets_used is empty.")
-
-  # keep only sets that have at least one gene in mat
-  present_counts <- vapply(used_sets, function(g) length(intersect(g, rownames(mat))), integer(1))
-  used_sets <- used_sets[present_counts > 0]
-
-  mat_z <- .row_z(mat)
-  Z_mod_by_cell <- .module_scores(mat_z, used_sets)  # modules x cells
-
-  # ensure R2 vector lines up with rows of Z_mod_by_cell
-  R2 <- P_res$R2[rownames(Z_mod_by_cell)]
-  # drop modules with all-NA scores (shouldn't happen, but safe)
-  keep_mod <- rowSums(is.finite(Z_mod_by_cell)) > 0 & is.finite(R2)
-  Z_mod_by_cell <- Z_mod_by_cell[keep_mod, , drop = FALSE]
-  R2 <- R2[keep_mod]
-
-  # pick top_n by R2
-  ord_R2 <- order(R2, decreasing = TRUE)
-  top_n <- min(top_n, length(R2))
-  top_mods <- rownames(Z_mod_by_cell)[ord_R2[seq_len(top_n)]]
-
-  ## ---------- plotting ----------
-  old_par <- par(no.readonly = TRUE)
-  on.exit(par(old_par), add = TRUE)
-
-  par(oma = c(0, 0, 2, 0))
-
-
-
-  ## top modules — dots + GAM curve
-  # palette for curves
-  base_cols <- c("#1f77b4","#d62728","#2ca02c","#9467bd","#8c564b",
-                 "#e377c2","#7f7f7f","#bcbd22","#17becf")
-  cols <- rep(base_cols, length.out = length(top_mods))
-
-  # order cells once by pseudotime for nice curves
-  ord_cells <- order(tvec)
-  t_o <- tvec[ord_cells]
-
-  # y-range across selected modules
-  y_min <- Inf; y_max <- -Inf
-  for (m in top_mods) {
-    y <- Z_mod_by_cell[m, ord_cells]
-    y_min <- min(y_min, min(y, na.rm = TRUE))
-    y_max <- max(y_max, max(y, na.rm = TRUE))
+  ## 3. Compute .metric_P_core() for each pathway
+  P_results <- list()
+  for (m in rownames(module_scores)) {
+    sc <- as.numeric(module_scores[m, ])
+    if (all(is.na(sc))) {
+      .msg("Skipping %s (no valid scores)", m)
+      next
+    }
+    .msg("Computing P metric for %s ...", m)
+    P_results[[m]] <- .metric_P_core(sc, pseudotime, ...)
   }
 
-  plot(NA, NA, xlim = range(t_o, na.rm = TRUE), ylim = c(y_min, y_max),
-       xlab = "Pseudotime", ylab = "Module scores")
 
-  i <- 0
-  for (m in top_mods) {
-    i <- i + 1
-    y <- Z_mod_by_cell[m, ]
-    y_o <- y[ord_cells]
+    ## 4) Minimal summary (only requested fields)
+    summary_tbl <- tibble::tibble(
+      pathway  = names(P_results),
+      P_value  = vapply(P_results, function(x) x$P, numeric(1)),
+      C_soft   = vapply(P_results, function(x) x$C_soft, numeric(1)),
+      T_peak   = vapply(P_results, function(x) x$T_peak, numeric(1)),
+      n_genes  = vapply(names(P_results),
+                        function(p) length(gene_sets[[p]]), integer(1))
+    )
 
-    # dots
-    points(t_o, y_o, pch = 16, cex = point_cex, col = ac(cols[i], point_alpha))
+    ## 5) Store "everything else" in a separate list
+    keep_in_summary <- c("P", "C_soft", "T_peak")
+    details <- lapply(P_results, function(x) {
+      x[setdiff(names(x), keep_in_summary)]
+    })
 
-    # fit & curve
-    fit <- mgcv::gam(y ~ s(tvec), method = "REML")
-    # predict on a smooth grid for a clean curve
-    t_grid <- seq(min(t_o, na.rm = TRUE), max(t_o, na.rm = TRUE), length.out = 200)
-    y_hat  <- stats::predict(fit, newdata = data.frame(tvec = t_grid), type = "response")
+    ## 6) Overall P (mean of per-pathway P)
+    P_overall <- mean(summary_tbl$P_value, na.rm = TRUE)
 
-    lines(t_grid, y_hat, col = cols[i], lwd = line_lwd)
+    list(
+      P_overall    = P_overall,
+      summary      = summary_tbl,   # only P_value, C_soft, T_peak, n_genes
+      details      = details,       # all other fields per pathway
+      module_scores = module_scores,
+      gene_sets     = gene_sets
+    )
   }
 
-  legend("topleft",
-         legend = paste0(seq_along(top_mods), ". ", top_mods,
-                         " (R^2=", sprintf("%.2f", R2[top_mods]), ")"),
-         col = cols[seq_along(top_mods)], lwd = 2, cex = 0.8, bty = "n")
 
-  legend("topright",
-         legend = sprintf("P = %.3f", mean(R2, na.rm = TRUE)),
-         bty = "n")
 
-  ## Global title
-  mtext(main, outer = TRUE, cex = 1.2, line = 0)
+
+
+
+
+
+
+
+#' Plot Program Coherence (P) Metric Results
+plot_P_module <- function(module_score, pseudotime, core, main = NULL, span = 0.5,
+                          pch = 16, cex = 0.7) {
+  stopifnot(length(module_score) == length(pseudotime))
+  ord <- order(pseudotime)
+  t <- as.numeric(pseudotime[ord])
+  s <- as.numeric(module_score[ord])
+
+  tau <- core$threshold
+  y   <- ifelse(s >= tau, 1L, -1L)
+  cols <- ifelse(y == 1L, "red", "grey70")
+
+  plot(t, s, col = cols, pch = pch, cex = cex,
+       xlab = "Pseudotime", ylab = "Module score (z)",
+       main = main)
+
+  # smooth curve (base R loess)
+  fit <- try(stats::loess(s ~ t, span = span), silent = TRUE)
+  if (!inherits(fit, "try-error")) {
+    tt <- seq(min(t), max(t), length.out = 200)
+    lines(tt, predict(fit, newdata = data.frame(t = tt)), lwd = 2)
+  }
+
+  # threshold line
+  abline(h = tau, col = "red", lty = 2)
+
+  legend("topleft", inset = 0.01,
+         legend = c("+1 (>= τ)", "-1 (< τ)"),
+         col = c("red", "grey70"), pch = 16, bty = "n")
 }
+# plot_P_module(P$module_scores[1,], pseudotime = seu$monocle3_pseudotime, core = P$details$hsa04660, main = "hsa04660")
 

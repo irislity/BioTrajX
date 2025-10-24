@@ -71,7 +71,6 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
                                          min_remaining = 10,
                                          min_fraction  = 0.20,
                                          min_genes_per_module = 3,
-                                         tol = 1e-8,
                                          plot_E = FALSE,
                                          verbose = TRUE) {
   E_method <- match.arg(E_method)
@@ -188,21 +187,19 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
 
     # ---- P (gene_sets wins) ----
     P_res <- tryCatch({
-      metrics_P(
-        sub$expr, sub$pt,
-        pathways = if (is.null(gene_sets)) pathways else NULL,
-        gene_sets = gene_sets,
-        naive_markers = naive_markers,
-        terminal_markers = terminal_markers,
-        id_type = id_type,
-        species = species,
-        assay = NULL, slot = "data",
-        min_remaining = min_remaining,
-        min_fraction = min_fraction,
-        min_genes_per_module = min_genes_per_module,
-        verbose = verbose
+      metric_P(
+        module_score   = sub$expr,       # or sub$module_score depending on structure
+        pseudotime     = sub$pt,
+        threshold      = "quantile",     # or "mean_sd"
+        q              = 0.8,
+        alpha          = 0.5,
+        soft_sigma     = "mad",
+        k_sigma        = 1.0,
+        M              = 500,
+        n_bins         = 10,
+        seed           = 1L
       )
-    }, error = function(e) list(P=NA_real_, error=e$message))
+    }, error = function(e) list(P = NA_real_, error = e$message))
 
     # ---- E ----
     # robust colMeans: handle empty overlaps to avoid numeric(0)
@@ -221,6 +218,8 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
         method = E_method, plot = isTRUE(plot_E)
       )
     }, error = function(e) list(E_naive=NA_real_, E_term=NA_real_, E_comp=NA_real_, error=e$message))
+
+
 
     # ---- Aggregate per-branch score ----
     comp_vec <- c(D_res$D_naive %||% NA_real_,
@@ -256,8 +255,9 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
     n_cells_total = sum(w),
     params = list(E_method=E_method, id_type=id_type, species=species,
                   min_remaining=min_remaining, min_fraction=min_fraction,
-                  min_genes_per_module=min_genes_per_module, tol=tol)
+                  min_genes_per_module=min_genes_per_module)
   )
+
 }
 
 
@@ -279,7 +279,6 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
                                         min_remaining = 10,
                                         min_fraction  = 0.20,
                                         min_genes_per_module = 3,
-                                        tol = 1e-8,
                                         plot_E = FALSE,
                                         verbose = TRUE,
                                         parallel = FALSE,
@@ -311,7 +310,6 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
       min_remaining = min_remaining,
       min_fraction = min_fraction,
       min_genes_per_module = min_genes_per_module,
-      tol = tol,
       plot_E = plot_E,
       verbose = verbose
     )
@@ -443,120 +441,263 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
 }
 
 # ---------- Plot ----------
-plot.multi_dope_results <- function(multi_dope_results,
-                                    metrics = c("D_naive","D_term","O","P","E_naive","E_term","DOPE_score"),
-                                    type = "bar",
-                                    branch_mode = c("facet","stack","separate")) {
+#' Plot DOPE metrics for multi-trajectory branched analysis
+#'
+#' This function visualizes the results from
+#' [compute_multi_DOPE_branched()] across trajectories and branches.
+#' It supports bar plots, heatmaps, and radar charts, and can display
+#' either overall aggregate DOPE scores or per-branch metrics.
+#'
+#' @param multi_dope_branched A result object returned by
+#'   [compute_multi_DOPE_branched()], containing overall comparisons,
+#'   per-branch comparisons, and branch-level data.
+#' @param scope Character scalar, either `"overall"` to plot aggregate
+#'   DOPE scores across trajectories, or `"branch"` to plot per-branch
+#'   metrics. Default is `"branch"`.
+#' @param metrics Character vector of metric names to plot. Common options
+#'   include `"D_naive"`, `"D_term"`, `"O"`, `"P"`, `"E_naive"`,
+#'   `"E_term"`, and `"DOPE_score"`. Defaults to all of these.
+#' @param type Character scalar, plot type: `"bar"`, `"heatmap"`,
+#'   or `"radar"`.
+#' @param branch_mode For branch scope only. Controls how branches are
+#'   displayed:
+#'   * `"facet"` – facet each branch into a separate panel,
+#'   * `"stack"` – combine trajectory and branch labels
+#'     (e.g., `"traj1 [B]"`),
+#'   * `"separate"` – for radar plots only, draw one radar per branch.
+#'   Default is `"facet"`.
+#' @param branches Optional character vector of branch names to include
+#'   (for `scope = "branch"`). Defaults to all branches present.
+#'
+#' @return For `"bar"` and `"heatmap"`, returns a `ggplot` object.
+#' For `"radar"`, draws the plot using base graphics and returns `NULL`
+#' invisibly.
+#'
+#' @details
+#' * Overall plots use `comparison_overall` from the branched DOPE result,
+#'   showing each trajectory’s aggregate DOPE score.
+#' * Branch plots iterate through `branch_data` and extract requested
+#'   metrics for each (trajectory, branch) pair. Metrics can be stored as
+#'   numeric values or nested lists/doubles inside each branch object; the
+#'   function extracts the first valid numeric value.
+#'
+#' @examples
+plot.multi_dope_results_branched <- function(multi_dope_branched,
+                                             scope = c("branch","overall"),
+                                             metrics = c("D_naive","D_term","O","P","E_naive","E_term","DOPE_score"),
+                                             type = c("bar","heatmap","radar"),
+                                             branch_mode = c("facet","stack","separate"),
+                                             branches = NULL) {
+  scope       <- match.arg(scope)
+  type        <- match.arg(type)
   branch_mode <- match.arg(branch_mode)
-  if (!requireNamespace("ggplot2", quietly = TRUE)) stop("ggplot2 package required for plotting")
-  cs <- multi_dope_results$comparison_summary
 
-  metrics <- intersect(metrics, names(cs))
-  if (length(metrics) == 0L) stop("No valid metrics to plot.")
+  # -------- Dependencies --------
+  if (!requireNamespace("ggplot2", quietly = TRUE)) stop("ggplot2 required")
+  if (type %in% c("bar","heatmap") && !requireNamespace("reshape2", quietly = TRUE))
+    stop("reshape2 required for long data (install.packages('reshape2'))")
+  if (type == "radar" && !requireNamespace("fmsb", quietly = TRUE))
+    stop("fmsb required for radar (install.packages('fmsb'))")
+  if (type == "radar" && !requireNamespace("scales", quietly = TRUE))
+    stop("scales required for radar (install.packages('scales'))")
 
-  has_branch <- "branch" %in% names(cs) && any(!is.na(cs$branch))
-  label_var <- "trajectory"
-  if (has_branch && branch_mode == "stack") {
-    cs$traj_label <- ifelse(is.na(cs$branch), cs$trajectory, paste0(cs$trajectory, " [", cs$branch, "]"))
-    label_var <- "traj_label"
+  `%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
+  num1 <- function(x) {
+    if (is.null(x)) return(NA_real_)
+    if (is.list(x)) x <- unlist(x, use.names = FALSE)
+    x <- suppressWarnings(as.numeric(x))
+    x <- x[is.finite(x)]
+    if (length(x)) x[1] else NA_real_
   }
 
-  if (type == "bar") {
-    if (!requireNamespace("reshape2", quietly = TRUE)) stop("reshape2 package required for bar plots")
-    plot_df <- cs[, c(label_var, "trajectory", "branch", metrics), drop = FALSE]
-    plot_long <- reshape2::melt(plot_df, id.vars = c(label_var, "trajectory", "branch"),
-                                variable.name = "metric", value.name = "score")
+  # extractor supports common nested fields inside each branch object
+  extract_metric <- function(obj, m) {
+    if (is.null(obj)) return(NA_real_)
+    switch(m,
+           "D_naive"   = num1(obj$D$D_naive %||% obj$D_naive %||% obj$D$naive),
+           "D_term"    = num1(obj$D$D_term  %||% obj$D_term  %||% obj$D$terminal),
+           "O"         = num1(obj$O$O       %||% obj$O),
+           "P"         = num1(obj$P$P       %||% obj$P),
+           "E_naive"   = num1(obj$E$E_naive %||% obj$E_naive %||% obj$E$naive),
+           "E_term"    = num1(obj$E$E_term  %||% obj$E_term  %||% obj$E$terminal),
+           "DOPE_score"= num1(obj$DOPE_score %||% obj$DOPE %||% obj$score),
+           # fallback: try direct name
+           num1(obj[[m]])
+    )
+  }
 
-    p <- ggplot2::ggplot(plot_long, ggplot2::aes_string(x = label_var, y = "score", fill = "metric")) +
-      ggplot2::geom_col(position = "dodge") +
-      ggplot2::theme_minimal() +
-      ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
-      ggplot2::labs(title = "DOPE Metrics Comparison", x = "Trajectory", y = "Score") +
-      ggplot2::ylim(0, 1)
+  # -------- Build tidy data --------
+  if (scope == "overall") {
+    # Use the aggregate DOPE by trajectory (mirrors your non-branched plot logic)
+    plot_data <- multi_dope_branched$comparison_overall
+    if (is.null(plot_data) || !nrow(plot_data)) stop("No overall comparison data found.")
+    # Permit plotting a single metric: rename to DOPE_score to reuse code paths
+    names(plot_data)[names(plot_data) == "aggregate_DOPE"] <- "DOPE_score"
+    metrics <- intersect(metrics, names(plot_data))
+    if (!length(metrics)) metrics <- "DOPE_score"
 
-    if (has_branch && branch_mode == "facet") p <- p + ggplot2::facet_wrap(~ branch, scales = "free_x")
-    return(p)
-
-  } else if (type == "heatmap") {
-    if (!requireNamespace("reshape2", quietly = TRUE)) stop("reshape2 package required for heatmap plots")
-    plot_df <- cs[, c(label_var, "trajectory", "branch", metrics), drop = FALSE]
-    plot_long <- reshape2::melt(plot_df, id.vars = c(label_var, "trajectory", "branch"),
-                                variable.name = "metric", value.name = "score")
-
-    p <- ggplot2::ggplot(plot_long, ggplot2::aes(x = metric, y = !!as.name(label_var), fill = score)) +
-      ggplot2::geom_tile(color = "white", size = 0.5) +
-      ggplot2::scale_fill_gradient2(low = "red", mid = "yellow", high = "green",
-                                    midpoint = 0.5, name = "Score", na.value = "grey90") +
-      ggplot2::theme_minimal() +
-      ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
-                     plot.title = ggplot2::element_text(hjust = 0.5)) +
-      ggplot2::labs(title = "DOPE Metrics Heatmap", x = "Metric", y = "Trajectory") +
-      ggplot2::geom_text(ggplot2::aes(label = ifelse(is.na(score), "NA", sprintf("%.2f", score))),
-                         color = "black", size = 3)
-
-    if (has_branch && branch_mode == "facet") p <- p + ggplot2::facet_wrap(~ branch, scales = "free_y")
-    return(p)
-
-  } else if (type == "radar") {
-    if (!requireNamespace("fmsb", quietly = TRUE))
-      stop("fmsb package required for radar plots. Install with: install.packages('fmsb')")
-    prep_radar <- function(df) {
-      mat <- as.data.frame(df[, metrics, drop = FALSE])
-      mat[is.na(mat)] <- 0
-      for (m in metrics) mat[[m]] <- pmax(0, pmin(1, mat[[m]]))
-      rbind(rep(1, length(metrics)), rep(0, length(metrics)), mat)
+    if (type == "bar") {
+      long <- reshape2::melt(plot_data[, c("trajectory", metrics), drop = FALSE],
+                             id.vars = "trajectory", variable.name = "metric", value.name = "score")
+      p <- ggplot2::ggplot(long, ggplot2::aes(x = trajectory, y = score, fill = metric)) +
+        ggplot2::geom_col(position = "dodge", na.rm = TRUE) +
+        ggplot2::theme_minimal() +
+        ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
+        ggplot2::labs(title = "Aggregate DOPE Across Trajectories",
+                      x = "Trajectory", y = "Score") +
+        ggplot2::coord_cartesian(ylim = c(0, 1))
+      return(p)
     }
 
-    if (has_branch && branch_mode == "separate") {
-      opar <- par(no.readonly = TRUE); on.exit(par(opar))
-      brs <- unique(cs$branch[!is.na(cs$branch)])
-      n <- length(brs); nc <- ceiling(sqrt(n)); nr <- ceiling(n / nc)
-      par(mfrow = c(nr, nc), mar = c(1,1,2,1))
-      for (b in brs) {
-        dfb <- cs[cs$branch == b, c(label_var, metrics), drop = FALSE]
-        rownames(dfb) <- dfb[[label_var]]
-        dfb[[label_var]] <- NULL
-        rad <- prep_radar(dfb)
-        rownames(rad) <- c("Max","Min", rownames(dfb))
-        fmsb::radarchart(rad, axistype = 1, pcol = 1:nrow(dfb), pfcol = scales::alpha(1:nrow(dfb), .2),
-                         plwd = 2, plty = 1,
-                         cglcol = "grey", cglty = 1, axislabcol = "grey",
-                         cglwd = 0.5, vlcex = 0.8, title = paste("Branch:", b))
-        legend("topright", legend = rownames(dfb), col = 1:nrow(dfb), lty = 1, lwd = 2, bty = "n", cex = 0.8)
-      }
-      return(invisible(NULL))
-    } else {
-      df <- cs[, c(label_var, metrics), drop = FALSE]
-      rownames(df) <- df[[label_var]]
-      df[[label_var]] <- NULL
-      rad <- prep_radar(df)
-      rownames(rad) <- c("Max","Min", rownames(df))
-      fmsb::radarchart(rad, axistype = 1, pcol = 1:nrow(df), pfcol = scales::alpha(1:nrow(df), .2),
-                       plwd = 2, plty = 1,
-                       cglcol = "grey", cglty = 1, axislabcol = "grey",
-                       cglwd = 0.5, vlcex = 0.8, title = "DOPE Metrics Radar")
-      legend("topright", legend = rownames(df), col = 1:nrow(df), lty = 1, lwd = 2, bty = "n", cex = 0.8)
+    if (type == "heatmap") {
+      long <- reshape2::melt(plot_data[, c("trajectory", metrics), drop = FALSE],
+                             id.vars = "trajectory", variable.name = "metric", value.name = "score")
+      p <- ggplot2::ggplot(long, ggplot2::aes(x = metric, y = trajectory, fill = score)) +
+        ggplot2::geom_tile(color = "white", size = 0.5) +
+        ggplot2::scale_fill_gradient2(low = "red", mid = "yellow", high = "green",
+                                      midpoint = 0.5, name = "Score", na.value = "grey90") +
+        ggplot2::theme_minimal() +
+        ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
+                       plot.title = ggplot2::element_text(hjust = 0.5)) +
+        ggplot2::labs(title = "Aggregate DOPE Heatmap", x = "Metric", y = "Trajectory") +
+        ggplot2::geom_text(ggplot2::aes(label = ifelse(is.na(score), "NA", sprintf("%.2f", score))),
+                           color = "black", size = 3)
+      return(p)
+    }
+
+    if (type == "radar") {
+      rd <- plot_data[, metrics, drop = FALSE]
+      rd[is.na(rd)] <- 0
+      for (m in metrics) rd[[m]] <- pmax(0, pmin(1, rd[[m]]))
+      rd <- rbind(rep(1, length(metrics)), rep(0, length(metrics)), rd)
+      rownames(rd) <- c("Max","Min", plot_data$trajectory)
+      n <- nrow(plot_data)
+      fmsb::radarchart(rd, axistype = 1,
+                       pcol = seq_len(n),
+                       pfcol = scales::alpha(seq_len(n), 0.25),
+                       plwd = 2, plty = 1, caxislabels = rep("", 5),
+                       cglcol = rgb(0, 0, 0, alpha = 0), cglty = 1,vlcex = 0,
+                       cglwd = 0.5, vlcex = 0.8, title = "Aggregate DOPE Radar")
+      graphics::legend("topright", legend = plot_data$trajectory,
+                       col = seq_len(n), lty = 1, lwd = 2, bty = "n", cex = 0.8)
       return(invisible(NULL))
     }
   } else {
-    stop("Plot type must be one of: 'bar', 'radar', or 'heatmap'")
+    # scope == "branch": assemble [branch, trajectory, metrics...] from branch_data
+    bd <- multi_dope_branched$branch_data
+    if (is.null(bd) || !length(bd)) stop("No branch_data found.")
+    # choose branches to include
+    if (is.null(branches)) branches <- names(bd)
+    branches <- intersect(branches, names(bd))
+    if (!length(branches)) stop("No matching branches to plot.")
+
+    rows <- list()
+    for (br in branches) {
+      tr_map <- bd[[br]]                 # trajectory -> branch_object
+      if (is.null(tr_map) || !length(tr_map)) next
+      for (traj in names(tr_map)) {
+        obj <- tr_map[[traj]]
+        vals <- setNames(numeric(length(metrics)), metrics)
+        for (m in metrics) vals[m] <- extract_metric(obj, m)
+        rows[[length(rows) + 1]] <- data.frame(
+          branch = br,
+          trajectory = traj,
+          as.list(vals),
+          check.names = FALSE,
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+    if (!length(rows)) stop("No branch rows assembled.")
+    plot_df <- do.call(rbind, rows)
+    # keep only present metrics
+    metrics <- intersect(metrics, setdiff(names(plot_df), c("branch","trajectory")))
+    if (!length(metrics)) stop("Requested metrics not found in branch results.")
+
+    # Label for stack mode
+    plot_df$traj_label <- paste0(plot_df$trajectory, " [", plot_df$branch, "]")
+
+    if (type == "bar") {
+      long <- reshape2::melt(plot_df[, c("branch","trajectory","traj_label", metrics), drop = FALSE],
+                             id.vars = c("branch","trajectory","traj_label"),
+                             variable.name = "metric", value.name = "score")
+      # x label depends on branch_mode
+      x_var <- if (branch_mode == "stack") "traj_label" else "trajectory"
+      p <- ggplot2::ggplot(long, ggplot2::aes_string(x = x_var, y = "score", fill = "metric")) +
+        ggplot2::geom_col(position = "dodge", na.rm = TRUE) +
+        ggplot2::theme_minimal() +
+        ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
+        ggplot2::labs(title = "DOPE Metrics by Branch", x = "Trajectory", y = "Score") +
+        ggplot2::coord_cartesian(ylim = c(0, 1))
+      if (branch_mode == "facet") {
+        p <- p + ggplot2::facet_wrap(~ branch, scales = "free_x")
+      }
+      return(p)
+    }
+
+    if (type == "heatmap") {
+      long <- reshape2::melt(plot_df[, c("branch","trajectory","traj_label", metrics), drop = FALSE],
+                             id.vars = c("branch","trajectory","traj_label"),
+                             variable.name = "metric", value.name = "score")
+      y_var <- if (branch_mode == "stack") "traj_label" else "trajectory"
+      p <- ggplot2::ggplot(long, ggplot2::aes_string(x = "metric", y = y_var, fill = "score")) +
+        ggplot2::geom_tile(color = "white", size = 0.5) +
+        ggplot2::scale_fill_gradient2(low = "red", mid = "yellow", high = "green",
+                                      midpoint = 0.5, name = "Score", na.value = "grey90") +
+        ggplot2::theme_minimal() +
+        ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
+                       plot.title = ggplot2::element_text(hjust = 0.5)) +
+        ggplot2::labs(title = "DOPE Metrics Heatmap (Branches)", x = "Metric", y = "Trajectory") +
+        ggplot2::geom_text(ggplot2::aes(label = ifelse(is.na(score), "NA", sprintf("%.2f", score))),
+                           color = "black", size = 3)
+      if (branch_mode == "facet") {
+        p <- p + ggplot2::facet_wrap(~ branch, scales = "free_y")
+      }
+      return(p)
+    }
+
+    if (type == "radar") {
+      # separate: one radar per branch; others: a single radar containing all rows
+      to_radar <- function(df_rows, title = "DOPE Metrics Radar") {
+        mat <- as.data.frame(df_rows[, metrics, drop = FALSE])
+        mat[is.na(mat)] <- 0
+        for (m in metrics) mat[[m]] <- pmax(0, pmin(1, mat[[m]]))
+        rad <- rbind(rep(1, length(metrics)), rep(0, length(metrics)), mat)
+        rownames(rad) <- c("Max","Min", rownames(df_rows))
+        n <- nrow(df_rows)
+        fmsb::radarchart(rad, axistype = 1,
+                         pcol = seq_len(n),
+                         pfcol = scales::alpha(seq_len(n), 0.25),
+                         plwd = 2, plty = 1,
+                         cglcol = "grey", cglty = 1, axislabcol = "grey", caxislabels = rep("",5),
+                         cglwd = 0.5, vlcex = 0, title = title)
+        graphics::legend("topright", legend = rownames(df_rows),
+                         col = seq_len(n), lty = 1, lwd = 2, bty = "n", cex = 0.8)
+      }
+
+      if (branch_mode == "separate") {
+        opar <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(opar))
+        brs <- unique(plot_df$branch)
+        n <- length(brs); nc <- ceiling(sqrt(n)); nr <- ceiling(n / nc)
+        graphics::par(mfrow = c(nr, nc), mar = c(1,1,2,1))
+        for (b in brs) {
+          dfb <- plot_df[plot_df$branch == b, c("trajectory", metrics), drop = FALSE]
+          rownames(dfb) <- dfb$trajectory
+          dfb$trajectory <- NULL
+          to_radar(dfb, title = paste("Branch:", b))
+        }
+        return(invisible(NULL))
+      } else {
+        # one radar: rows are either trajectory or trajectory [branch]
+        df <- plot_df[, c(if (branch_mode == "stack") "traj_label" else "trajectory", metrics), drop = FALSE]
+        rownames(df) <- df[[if (branch_mode == "stack") "traj_label" else "trajectory"]]
+        df[[if (branch_mode == "stack") "traj_label" else "trajectory"]] <- NULL
+        to_radar(df, title = "DOPE Metrics Radar (Branches)")
+        return(invisible(NULL))
+      }
+    }
   }
+
+  stop("Unknown configuration.")
 }
 
-# ---------- Helper to assemble a nice S3-like container ----------
-as.multi_dope_results <- function(multi_out) {
-  comp_sum <- create_comparison_summary_branched(multi_out)
-  structure(list(
-    results = multi_out$results,
-    comparison = multi_out$comparison,
-    comparison_summary = comp_sum,
-    best_trajectory = multi_out$best_trajectory %||% NA_character_,
-    n_trajectories = length(multi_out$results),
-    method_info = list(
-      E_method = multi_out$args$E_method %||% NA_character_,
-      parallel = multi_out$args$parallel %||% FALSE,
-      n_cores  = multi_out$args$n_cores %||% NA_integer_,
-      trajectory = "branched"
-    )
-  ), class = "multi_dope_results")
-}
