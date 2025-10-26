@@ -1,4 +1,20 @@
-url: ~
+url: https://irislity.github.io/BioTrajX/
 template:
   bootstrap: 5
+navbar:
+  structure:
+    left: [reference]
+reference:
+  - title: "DOE scoring wrappers"
+    desc: "High-level helpers for computing DOE metrics."
+    contents:
+      - compute_single_DOE_linear
+      - compute_multi_DOE_linear
+      - compute_single_DOE_branched
+      - compute_multi_DOE_branched
+  - title: "Visualization"
+    desc: "Plot DOE summaries across trajectories and branches."
+    contents:
+      - plot.multi_doe_results
+      - plot.multi_doe_branched
 

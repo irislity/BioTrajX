@@ -1,5 +1,5 @@
 # =========================
-# Branched DOPE (rewritten)
+# Branched DOE (rewritten)
 # =========================
 
 # ---------- Utilities ----------
@@ -30,7 +30,7 @@
       E_naive      = res$E$E_naive %||% NA_real_,
       E_term       = res$E$E_term  %||% NA_real_,
       E_comp       = res$E$E_comp  %||% NA_real_,
-      DOPE_score   = res$DOPE_score %||% NA_real_,
+      DOE_score   = res$DOE_score %||% NA_real_,
       has_error    = if (!is.null(res$errors)) any(vapply(res$errors, function(x) !is.null(x), logical(1))) else FALSE,
       stringsAsFactors = FALSE
     )
@@ -53,8 +53,36 @@
 }
 
 # ---------- Core: single trajectory across multiple branches ----------
-#' Compute DOPE for one pseudotime with multiple branches
-compute_single_DOPE_branched <- function(expr_or_seurat,
+#' Compute DOE metrics for a branched trajectory
+#'
+#' Evaluate Directionality, Order, and Endpoint (DOE) metrics for a single
+#' pseudotime trajectory that contains multiple branches. Marker sets are
+#' provided per branch and the function optionally subsets cells before
+#' computing the component metrics.
+#'
+#' @param expr_or_seurat Expression matrix (genes × cells) or Seurat object.
+#' @param pseudotime Numeric vector of pseudotime values (named by cell).
+#' @param naive_markers_list Named list of naïve-state markers per branch.
+#' @param terminal_markers_list Named list of terminal-state markers per branch.
+#' @param cluster_labels Optional per-cell cluster/branch labels or metadata
+#'   column name (for Seurat inputs).
+#' @param branch_filters Optional named list of branch-specific subsetting
+#'   rules (each element can contain `include`, `exclude`, `min_cells`,
+#'   `drop_unused_levels`).
+#' @param E_method Endpoint scoring approach; one of `"gmm"`, `"clusters"`,
+#'   or `"combined"`.
+#' @param assay Assay to use when `expr_or_seurat` is a Seurat object.
+#' @param slot Assay slot to use when `expr_or_seurat` is a Seurat object.
+#' @param plot_E Logical; pass through to `metrics_E()` plotting helpers.
+#' @param verbose Logical; print progress messages.
+#' @param tol Numerical tolerance forwarded to `metrics_O()` when supported.
+#'
+#' @return A list containing branch-level DOE results, aggregated scores, and
+#'   metadata. Each branch entry includes component metrics and a scalar
+#'   `DOE_score`.
+#'
+#' @export
+compute_single_DOE_branched <- function(expr_or_seurat,
                                          pseudotime,
                                          naive_markers_list,
                                          terminal_markers_list,
@@ -64,7 +92,8 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
                                          assay = NULL,
                                          slot = "data",
                                          plot_E = FALSE,
-                                         verbose = TRUE) {
+                                         verbose = TRUE,
+                                         tol = 1e-8) {
   E_method <- match.arg(E_method)
 
   # ---- Branch sanity ----
@@ -198,7 +227,7 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
       branch = b,
       n_cells = ncol(sub$expr),
       D = D_res, O = O_res, E = E_res,
-      DOPE_score = score,
+      DOE_score = score,
       cells = sub$cells
     )
   }
@@ -208,13 +237,13 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
 
   # ---- Overall aggregate (weighted by branch cell count) ----
   w <- vapply(branch_results, function(x) x$n_cells, numeric(1))
-  s <- vapply(branch_results, function(x) x$DOPE_score, numeric(1))
+  s <- vapply(branch_results, function(x) x$DOE_score, numeric(1))
   agg <- if (all(is.na(s))) NA_real_ else stats::weighted.mean(s, w, na.rm = TRUE)
 
   # ---- Return structure expected by the multi-trajectory wrapper ----
   list(
-    branches = branch_results,            # each [[b]] has $DOPE_score
-    aggregate_DOPE = agg,                 # overall
+    branches = branch_results,            # each [[b]] has $DOE_score
+    aggregate_DOE = agg,                 # overall
     weights = w,                          # branch cell counts
     n_cells_total = sum(w),
     params = list(E_method=E_method)
@@ -224,8 +253,25 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
 
 
 # ---------- Multi-trajectory (branched) ----------
-#' Compute DOPE across multiple pseudotime trajectories with branches
-compute_multi_DOPE_branched <- function(expr_or_seurat,
+#' Compute DOE across multiple branched trajectories
+#'
+#' Run `compute_single_DOE_branched()` over a set of pseudotime trajectories
+#' that share an expression object. The function collates branch-level results
+#' and generates summary tables for downstream plotting and ranking.
+#'
+#' @inheritParams compute_single_DOE_branched
+#' @param expr_or_seurat Expression matrix or Seurat object shared across
+#'   trajectories.
+#' @param pseudotime_list Named list of pseudotime vectors (one per trajectory).
+#' @param parallel Logical; evaluate trajectories in parallel when possible.
+#' @param n_cores Number of workers to use for parallel evaluation.
+#' @param tol Numerical tolerance forwarded to `compute_single_DOE_branched()`.
+#'
+#' @return A list with class `"multi_doe_branched"` containing per-trajectory
+#'   results, overall/branch comparisons, and metadata about the run.
+#'
+#' @export
+compute_multi_DOE_branched <- function(expr_or_seurat,
                                         pseudotime_list,
                                         naive_markers_list,
                                         terminal_markers_list,
@@ -237,7 +283,8 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
                                         plot_E = FALSE,
                                         verbose = TRUE,
                                         parallel = FALSE,
-                                        n_cores = NULL) {
+                                        n_cores = NULL,
+                                        tol = 1e-8) {
 
   E_method <- match.arg(E_method)
 
@@ -247,7 +294,7 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
 
   run_one <- function(name, pt) {
     if (isTRUE(verbose)) message("\n=== Trajectory: ", name, " ===")
-    out <- compute_single_DOPE_branched(
+    out <- compute_single_DOE_branched(
       expr_or_seurat = expr_or_seurat,
       pseudotime = pt,
       naive_markers_list = naive_markers_list,
@@ -258,7 +305,8 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
       assay = assay,
       slot = slot,
       plot_E = plot_E,
-      verbose = verbose
+      verbose = verbose,
+      tol = tol
     )
     out$trajectory <- name
     out
@@ -275,7 +323,7 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
       function(i) {
         name <- names(pseudotime_list)[i]
         pt   <- pseudotime_list[[i]]
-        run_one(name, pt)  # NOTE: compute_single_DOPE_branched must be visible on workers
+        run_one(name, pt)  # NOTE: compute_single_DOE_branched must be visible on workers
       }
     )
     names(res_list) <- names(pseudotime_list)
@@ -287,17 +335,17 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
   # --- Overall comparison ---
   comparison_overall <- data.frame(
     trajectory = names(res_list),
-    aggregate_DOPE = vapply(res_list, function(x) {
-      if (!is.null(x$aggregate_DOPE)) as.numeric(x$aggregate_DOPE) else NA_real_
+    aggregate_DOE = vapply(res_list, function(x) {
+      if (!is.null(x$aggregate_DOE)) as.numeric(x$aggregate_DOE) else NA_real_
     }, numeric(1)),
     stringsAsFactors = FALSE
   )
-  comparison_overall <- comparison_overall[order(comparison_overall$aggregate_DOPE,
+  comparison_overall <- comparison_overall[order(comparison_overall$aggregate_DOE,
                                                  decreasing = TRUE, na.last = TRUE), , drop = FALSE]
-  best_overall <- if (all(is.na(comparison_overall$aggregate_DOPE))) NA_character_
+  best_overall <- if (all(is.na(comparison_overall$aggregate_DOE))) NA_character_
   else comparison_overall$trajectory[1]
 
-  # --- Per-branch ranking via branches[[br]]$DOPE_score ---
+  # --- Per-branch ranking via branches[[br]]$DOE_score ---
   all_branches <- sort(unique(unlist(lapply(res_list, function(x) names(x$branches)))))
 
   branch_comparisons <- setNames(vector("list", length(all_branches)), all_branches)
@@ -307,8 +355,8 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
   for (br in all_branches) {
     scores <- vapply(res_list, function(x) {
       if (!is.null(x$branches) && !is.null(x$branches[[br]]) &&
-          !is.null(x$branches[[br]]$DOPE_score)) {
-        as.numeric(x$branches[[br]]$DOPE_score)
+          !is.null(x$branches[[br]]$DOE_score)) {
+        as.numeric(x$branches[[br]]$DOE_score)
       } else {
         NA_real_
       }
@@ -316,14 +364,14 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
 
     df <- data.frame(
       trajectory = names(res_list),
-      DOPE_score = scores,
+      DOE_score = scores,
       stringsAsFactors = FALSE
     )
-    df <- df[order(df$DOPE_score, decreasing = TRUE, na.last = TRUE), , drop = FALSE]
+    df <- df[order(df$DOE_score, decreasing = TRUE, na.last = TRUE), , drop = FALSE]
     branch_comparisons[[br]] <- df
 
-    bt <- if (all(is.na(df$DOPE_score))) NA_character_ else df$trajectory[1]
-    bs <- if (is.na(bt)) NA_real_ else df$DOPE_score[1]
+    bt <- if (all(is.na(df$DOE_score))) NA_character_ else df$trajectory[1]
+    bs <- if (is.na(bt)) NA_real_ else df$DOE_score[1]
     best_per_branch[[br]] <- data.frame(
       branch = br, best_trajectory = bt, best_score = bs,
       stringsAsFactors = FALSE
@@ -350,22 +398,23 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
     results = res_list,
     comparison_overall = comparison_overall,
     best_overall = best_overall,
-    comparison_by_branch = comparison_by_branch,  # columns: branch, trajectory, DOPE_score
+    comparison_by_branch = comparison_by_branch,  # columns: branch, trajectory, DOE_score
     best_per_branch = best_per_branch,            # columns: branch, best_trajectory, best_score
-    branch_comparisons = branch_comparisons,      # per-branch sorted tables (DOPE_score)
+    branch_comparisons = branch_comparisons,      # per-branch sorted tables (DOE_score)
     branch_data = branch_data,                    # branch -> trajectory -> raw branch object
     args = list(E_method=E_method,
                 parallel=parallel, n_cores=n_cores)
   )
+  class(res) <- "multi_doe_branched"
 
   if (isTRUE(verbose)) {
     cat("\n==========================================================\n")
-    cat("Multi-trajectory branched DOPE analysis complete!\n")
+    cat("Multi-trajectory branched DOE analysis complete!\n")
     if (!is.na(res$best_overall)) {
-      bo <- res$comparison_overall$aggregate_DOPE[
+      bo <- res$comparison_overall$aggregate_DOE[
         res$comparison_overall$trajectory == res$best_overall
       ]
-      cat(sprintf("Best overall trajectory: %s (DOPE: %.3f)\n", res$best_overall, bo))
+      cat(sprintf("Best overall trajectory: %s (DOE: %.3f)\n", res$best_overall, bo))
     } else {
       cat("Best overall trajectory: NA (no valid scores)\n")
     }
@@ -378,7 +427,7 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
         if (is.na(bt)) {
           cat(sprintf("  - %s: NA (no valid scores)\n", br))
         } else {
-          cat(sprintf("  - %s: %s (DOPE: %.3f)\n", br, bt, sc))
+          cat(sprintf("  - %s: %s (DOE: %.3f)\n", br, bt, sc))
         }
       }
     }
@@ -388,22 +437,22 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
 }
 
 # ---------- Plot ----------
-#' Plot DOPE metrics for multi-trajectory branched analysis
+#' Plot DOE metrics for multi-trajectory branched analysis
 #'
 #' This function visualizes the results from
-#' [compute_multi_DOPE_branched()] across trajectories and branches.
+#' [compute_multi_DOE_branched()] across trajectories and branches.
 #' It supports bar plots, heatmaps, and radar charts, and can display
-#' either overall aggregate DOPE scores or per-branch metrics.
+#' either overall aggregate DOE scores or per-branch metrics.
 #'
-#' @param multi_dope_branched A result object returned by
-#'   [compute_multi_DOPE_branched()], containing overall comparisons,
+#' @param multi_doe_branched A result object returned by
+#'   [compute_multi_DOE_branched()], containing overall comparisons,
 #'   per-branch comparisons, and branch-level data.
 #' @param scope Character scalar, either `"overall"` to plot aggregate
-#'   DOPE scores across trajectories, or `"branch"` to plot per-branch
+#'   DOE scores across trajectories, or `"branch"` to plot per-branch
 #'   metrics. Default is `"branch"`.
 #' @param metrics Character vector of metric names to plot. Common options
 #'   include `"D_naive"`, `"D_term"`, `"O"`, `"E_naive"`,
-#'   `"E_term"`, and `"DOPE_score"`. Defaults to all of these.
+#'   `"E_term"`, and `"DOE_score"`. Defaults to all of these.
 #' @param type Character scalar, plot type: `"bar"`, `"heatmap"`,
 #'   or `"radar"`.
 #' @param branch_mode For branch scope only. Controls how branches are
@@ -421,17 +470,18 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
 #' invisibly.
 #'
 #' @details
-#' * Overall plots use `comparison_overall` from the branched DOPE result,
-#'   showing each trajectory’s aggregate DOPE score.
+#' * Overall plots use `comparison_overall` from the branched DOE result,
+#'   showing each trajectory’s aggregate DOE score.
 #' * Branch plots iterate through `branch_data` and extract requested
 #'   metrics for each (trajectory, branch) pair. Metrics can be stored as
 #'   numeric values or nested lists/doubles inside each branch object; the
 #'   function extracts the first valid numeric value.
 #'
 #' @examples
-plot.multi_dope_results_branched <- function(multi_dope_branched,
+#' @export
+plot.multi_doe_branched <- function(multi_doe_branched,
                                              scope = c("branch","overall"),
-                                             metrics = c("D_naive","D_term","O","E_naive","E_term","DOPE_score"),
+                                             metrics = c("D_naive","D_term","O","E_naive","E_term","DOE_score"),
                                              type = c("bar","heatmap","radar"),
                                              branch_mode = c("facet","stack","separate"),
                                              branches = NULL) {
@@ -466,7 +516,7 @@ plot.multi_dope_results_branched <- function(multi_dope_branched,
            "O"         = num1(obj$O$O       %||% obj$O),
            "E_naive"   = num1(obj$E$E_naive %||% obj$E_naive %||% obj$E$naive),
            "E_term"    = num1(obj$E$E_term  %||% obj$E_term  %||% obj$E$terminal),
-           "DOPE_score"= num1(obj$DOPE_score %||% obj$DOPE %||% obj$score),
+           "DOE_score"= num1(obj$DOE_score %||% obj$DOE %||% obj$score),
            # fallback: try direct name
            num1(obj[[m]])
     )
@@ -474,13 +524,13 @@ plot.multi_dope_results_branched <- function(multi_dope_branched,
 
   # -------- Build tidy data --------
   if (scope == "overall") {
-    # Use the aggregate DOPE by trajectory (mirrors your non-branched plot logic)
-    plot_data <- multi_dope_branched$comparison_overall
+    # Use the aggregate DOE by trajectory (mirrors your non-branched plot logic)
+    plot_data <- multi_doe_branched$comparison_overall
     if (is.null(plot_data) || !nrow(plot_data)) stop("No overall comparison data found.")
-    # Permit plotting a single metric: rename to DOPE_score to reuse code paths
-    names(plot_data)[names(plot_data) == "aggregate_DOPE"] <- "DOPE_score"
+    # Permit plotting a single metric: rename to DOE_score to reuse code paths
+    names(plot_data)[names(plot_data) == "aggregate_DOE"] <- "DOE_score"
     metrics <- intersect(metrics, names(plot_data))
-    if (!length(metrics)) metrics <- "DOPE_score"
+    if (!length(metrics)) metrics <- "DOE_score"
 
     if (type == "bar") {
       long <- reshape2::melt(plot_data[, c("trajectory", metrics), drop = FALSE],
@@ -489,7 +539,7 @@ plot.multi_dope_results_branched <- function(multi_dope_branched,
         ggplot2::geom_col(position = "dodge", na.rm = TRUE) +
         ggplot2::theme_minimal() +
         ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
-        ggplot2::labs(title = "Aggregate DOPE Across Trajectories",
+        ggplot2::labs(title = "Aggregate DOE Across Trajectories",
                       x = "Trajectory", y = "Score") +
         ggplot2::coord_cartesian(ylim = c(0, 1))
       return(p)
@@ -505,7 +555,7 @@ plot.multi_dope_results_branched <- function(multi_dope_branched,
         ggplot2::theme_minimal() +
         ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
                        plot.title = ggplot2::element_text(hjust = 0.5)) +
-        ggplot2::labs(title = "Aggregate DOPE Heatmap", x = "Metric", y = "Trajectory") +
+        ggplot2::labs(title = "Aggregate DOE Heatmap", x = "Metric", y = "Trajectory") +
         ggplot2::geom_text(ggplot2::aes(label = ifelse(is.na(score), "NA", sprintf("%.2f", score))),
                            color = "black", size = 3)
       return(p)
@@ -523,14 +573,14 @@ plot.multi_dope_results_branched <- function(multi_dope_branched,
                        pfcol = scales::alpha(seq_len(n), 0.25),
                        plwd = 2, plty = 1, caxislabels = rep("", 5),
                        cglcol = rgb(0, 0, 0, alpha = 0), cglty = 1,vlcex = 0,
-                       cglwd = 0.5, vlcex = 0.8, title = "Aggregate DOPE Radar")
+                       cglwd = 0.5, vlcex = 0.8, title = "Aggregate DOE Radar")
       graphics::legend("topright", legend = plot_data$trajectory,
                        col = seq_len(n), lty = 1, lwd = 2, bty = "n", cex = 0.8)
       return(invisible(NULL))
     }
   } else {
     # scope == "branch": assemble [branch, trajectory, metrics...] from branch_data
-    bd <- multi_dope_branched$branch_data
+    bd <- multi_doe_branched$branch_data
     if (is.null(bd) || !length(bd)) stop("No branch_data found.")
     # choose branches to include
     if (is.null(branches)) branches <- names(bd)
@@ -573,7 +623,7 @@ plot.multi_dope_results_branched <- function(multi_dope_branched,
         ggplot2::geom_col(position = "dodge", na.rm = TRUE) +
         ggplot2::theme_minimal() +
         ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
-        ggplot2::labs(title = "DOPE Metrics by Branch", x = "Trajectory", y = "Score") +
+        ggplot2::labs(title = "DOE Metrics by Branch", x = "Trajectory", y = "Score") +
         ggplot2::coord_cartesian(ylim = c(0, 1))
       if (branch_mode == "facet") {
         p <- p + ggplot2::facet_wrap(~ branch, scales = "free_x")
@@ -593,7 +643,7 @@ plot.multi_dope_results_branched <- function(multi_dope_branched,
         ggplot2::theme_minimal() +
         ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
                        plot.title = ggplot2::element_text(hjust = 0.5)) +
-        ggplot2::labs(title = "DOPE Metrics Heatmap (Branches)", x = "Metric", y = "Trajectory") +
+        ggplot2::labs(title = "DOE Metrics Heatmap (Branches)", x = "Metric", y = "Trajectory") +
         ggplot2::geom_text(ggplot2::aes(label = ifelse(is.na(score), "NA", sprintf("%.2f", score))),
                            color = "black", size = 3)
       if (branch_mode == "facet") {
@@ -604,7 +654,7 @@ plot.multi_dope_results_branched <- function(multi_dope_branched,
 
     if (type == "radar") {
       # separate: one radar per branch; others: a single radar containing all rows
-      to_radar <- function(df_rows, title = "DOPE Metrics Radar") {
+      to_radar <- function(df_rows, title = "DOE Metrics Radar") {
         mat <- as.data.frame(df_rows[, metrics, drop = FALSE])
         mat[is.na(mat)] <- 0
         for (m in metrics) mat[[m]] <- pmax(0, pmin(1, mat[[m]]))
@@ -638,7 +688,7 @@ plot.multi_dope_results_branched <- function(multi_dope_branched,
         df <- plot_df[, c(if (branch_mode == "stack") "traj_label" else "trajectory", metrics), drop = FALSE]
         rownames(df) <- df[[if (branch_mode == "stack") "traj_label" else "trajectory"]]
         df[[if (branch_mode == "stack") "traj_label" else "trajectory"]] <- NULL
-        to_radar(df, title = "DOPE Metrics Radar (Branches)")
+        to_radar(df, title = "DOE Metrics Radar (Branches)")
         return(invisible(NULL))
       }
     }

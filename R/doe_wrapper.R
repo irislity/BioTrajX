@@ -1,7 +1,8 @@
-#' Compute DOPE metrics for a single trajectory (linear)
+#' Compute DOE metrics for a single trajectory (linear)
 #'
+#' @name compute_single_DOE_linear
 #' @description
-#' High-level convenience wrapper that computes the DOPE components—
+#' High-level convenience wrapper that computes the DOE components—
 #' Directionality (D), Order consistency (O), and
 #' Endpoints validity (E)—for a single trajectory. Works with either a
 #' **Seurat** object (pulling assay data via `GetAssayData`) or an expression
@@ -47,7 +48,7 @@
 #'   \item Computes D via `metrics_D()`, O via `metrics_O()`,
 #'         and E via `metrics_E()` (controlled by `E_method`, `plot_E`, and
 #'         optional cluster specification).
-#'   \item Aggregates a scalar `DOPE_score` as the mean of available component
+#'   \item Aggregates a scalar `DOE_score` as the mean of available component
 #'         scores (ignoring `NA`s).
 #' }
 #'
@@ -56,12 +57,12 @@
 #' by `E` are computed internally as mean expression over the provided marker
 #' sets.
 #'
-#' @return An object of class `"dope_results"`, a list with elements:
+#' @return An object of class `"doe_results"`, a list with elements:
 #' \describe{
 #'   \item{$D$}{List with `D_naive`, `D_term`.}
 #'   \item{$O$}{List with scalar `O`.}
 #'   \item{$E$}{List with `E_naive`, `E_term`, and composite `E_comp`.}
-#'   \item{$DOPE_score$}{Scalar mean over available component scores.}
+#'   \item{$DOE_score$}{Scalar mean over available component scores.}
 #'   \item{$errors$}{List of caught error messages for D/O/E (may be `NULL`).}
 #' }
 #'
@@ -79,7 +80,7 @@
 #' @examples
 #' \dontrun{
 #'
-#' res <- compute_single_DOPE_linear(
+#' res <- compute_single_DOE_linear(
 #'   expr_or_seurat   = expr,
 #'   pseudotime       = pt,
 #'   naive_markers    = naive,
@@ -91,7 +92,14 @@
 #'
 #' }
 #'
-#' @export
+NULL
+
+# Define a simple infix helper used throughout DOE summaries
+`%||%` <- function(x, y) {
+  if (is.null(x) || length(x) == 0L) return(y)
+  if (isTRUE(all(is.na(x)))) return(y)
+  x
+}
 
 
 # ---------- Small utilities ----------.
@@ -190,7 +198,9 @@ subset_by_clusters <- function(expr_or_seurat,
 # ===============================
 # Core single-trajectory wrapper
 # ===============================
-compute_single_DOPE_linear <- function(expr_or_seurat,
+#' @rdname compute_single_DOE_linear
+#' @export
+compute_single_DOE_linear <- function(expr_or_seurat,
                                        pseudotime,
                                        naive_markers,
                                        terminal_markers,
@@ -205,7 +215,8 @@ compute_single_DOPE_linear <- function(expr_or_seurat,
                                        branch_include = NULL,
                                        branch_exclude = NULL,
                                        branch_min_cells = 10,
-                                       drop_unused_levels = TRUE) {
+                                       drop_unused_levels = TRUE,
+                                       tol = 1e-8) {
   E_method   <- match.arg(E_method)
 
   expr <- .get_expr(expr_or_seurat, assay = assay, slot = slot)
@@ -272,16 +283,16 @@ compute_single_DOPE_linear <- function(expr_or_seurat,
     O_res$O       %||% NA_real_,
     E_res$E_comp  %||% NA_real_
   )
-  DOPE_score <- if (all(is.na(comp_vec))) NA_real_ else mean(comp_vec, na.rm = TRUE)
+  DOE_score <- if (all(is.na(comp_vec))) NA_real_ else mean(comp_vec, na.rm = TRUE)
 
   out <- list(
     D = list(D_naive = D_res$D_naive %||% NA_real_, D_term = D_res$D_term %||% NA_real_),
     O = list(O = O_res$O %||% NA_real_),
     E = list(E_naive = E_res$E_naive %||% NA_real_, E_term = E_res$E_term %||% NA_real_, E_comp = E_res$E_comp %||% NA_real_),
-    DOPE_score = DOPE_score,
+    DOE_score = DOE_score,
     errors = list(D_error = D_res$error, O_error = O_res$error, E_error = E_res$error)
   )
-  class(out) <- "dope_results"
+  class(out) <- "doe_results"
 
 
   plot_metrics_D(pseudotime,D_res)
@@ -289,7 +300,7 @@ compute_single_DOPE_linear <- function(expr_or_seurat,
                  naive_markers,terminal_markers)
   plot_metrics_E(E_res)
 
-  return (out = out)
+  return(out)
 
 }
 
@@ -308,7 +319,7 @@ create_comparison_summary <- function(trajectory_results) {
     E_naive = numeric(),
     E_term = numeric(),
     E_comp = numeric(),
-    DOPE_score = numeric(),
+    DOE_score = numeric(),
     has_error = logical(),
     stringsAsFactors = FALSE
   )
@@ -326,20 +337,20 @@ create_comparison_summary <- function(trajectory_results) {
       E_naive = result$E$E_naive %||% NA_real_,
       E_term  = result$E$E_term  %||% NA_real_,
       E_comp  = result$E$E_comp  %||% NA_real_,
-      DOPE_score = result$DOPE_score %||% NA_real_,
+      DOE_score = result$DOE_score %||% NA_real_,
       has_error = has_error,
       stringsAsFactors = FALSE
     )
     summary_data <- rbind(summary_data, row_data)
   }
 
-  metrics <- c("D_naive","D_term","O","E_naive","E_term","E_comp","DOPE_score")
+  metrics <- c("D_naive","D_term","O","E_naive","E_term","E_comp","DOE_score")
   for (metric in metrics) {
     rank_col <- paste0(metric, "_rank")
     summary_data[[rank_col]] <- rank(-summary_data[[metric]], na.last = "keep", ties.method = "min")
   }
 
-  summary_data <- summary_data[order(summary_data$DOPE_score, decreasing = TRUE, na.last = TRUE), ]
+  summary_data <- summary_data[order(summary_data$DOE_score, decreasing = TRUE, na.last = TRUE), ]
   rownames(summary_data) <- NULL
   summary_data
 }
@@ -349,18 +360,18 @@ create_comparison_summary <- function(trajectory_results) {
 # ===============================
 # Multi-trajectory wrapper
 # ===============================
-#' Compute DOPE metrics for multiple linear trajectories
+#' Compute DOE metrics for multiple linear trajectories
 #'
 #' @description
-#' Runs the full DOPE pipeline (Directionality **D**, Order consistency **O**,
+#' Runs the full DOE pipeline (Directionality **D**, Order consistency **O**,
 #' Endpoints validity **E**, and the combined
-#' `DOPE_score`) across **multiple linear** pseudotime vectors sharing the
+#' `DOE_score`) across **multiple linear** pseudotime vectors sharing the
 #' same expression object. Results are collected per trajectory and summarized
 #' in a comparison table with the best trajectory highlighted.
 #'
 #' @details
 #' This function is a convenience wrapper that repeatedly calls
-#' [compute_single_DOPE_linear()] for each linear trajectory provided in
+#' [compute_single_DOE_linear()] for each linear trajectory provided in
 #' `pseudotime_list`. It supports optional parallelization via the
 #' **parallel** package (fork/PSOCK, depending on platform).
 #'
@@ -384,7 +395,7 @@ create_comparison_summary <- function(trajectory_results) {
 #' @param terminal_clusters Optional character vector of cluster names considered
 #'   terminal (E Case 2 / cluster-based).
 #' @param E_method Endpoints validity method. One of `"gmm"`, `"clusters"`,
-#'   or `"combined"`. See [compute_single_DOPE_linear()] for details.
+#'   or `"combined"`. See [compute_single_DOE_linear()] for details.
 #' @param assay If `expr_or_seurat` is a Seurat object, the assay to use.
 #'   If `NULL`, defaults to `Seurat::DefaultAssay()`.
 #' @param slot If `expr_or_seurat` is a Seurat object, the assay slot to
@@ -399,25 +410,25 @@ create_comparison_summary <- function(trajectory_results) {
 #' @param tol Numerical tolerance for internal numerical checks.
 #'
 #' @return
-#' An object of class `"multi_dope_results"` with components:
+#' An object of class `"multi_doe_results"` with components:
 #' \itemize{
-#'   \item \code{results}: named list of per-trajectory DOPE results
-#'         (each as returned by \code{compute_single_DOPE_linear()}).
+#'   \item \code{results}: named list of per-trajectory DOE results
+#'         (each as returned by \code{compute_single_DOE_linear()}).
 #'   \item \code{comparison_summary}: \code{data.frame} summarizing
-#'         D/O/E and \code{DOPE_score} per trajectory.
+#'         D/O/E and \code{DOE_score} per trajectory.
 #'   \item \code{best_trajectory}: character scalar with the name of the
 #'         highest-scoring trajectory (or \code{NA} if none valid).
 #'   \item \code{n_trajectories}: integer count.
 #'   \item \code{method_info}: list of key settings used.
 #' }
 #'
-#' @seealso [compute_single_DOPE_linear()], plotting helpers like
-#'   \code{plot.multi_dope_results()}.
+#' @seealso [compute_single_DOE_linear()], plotting helpers like
+#'   \code{plot.multi_doe_results()}.
 #'
 #' @examples
 #' \dontrun{
 #' # expr: genes x cells matrix; pt1, pt2: numeric pseudotime vectors (length = ncol(expr))
-#' res <- compute_multi_DOPE_linear(
+#' res <- compute_multi_DOE_linear(
 #'   expr_or_seurat = expr,
 #'   pseudotime_list = list(linear_a = pt1, linear_b = pt2),
 #'   naive_markers = c("TCF7","LEF1"),
@@ -431,7 +442,7 @@ create_comparison_summary <- function(trajectory_results) {
 #'
 #' @export
 
-compute_multi_DOPE_linear <- function(
+compute_multi_DOE_linear <- function(
     expr_or_seurat,
     pseudotime_list,
     naive_markers,
@@ -464,7 +475,7 @@ compute_multi_DOPE_linear <- function(
   n_trajectories <- length(pseudotime_list)
 
   if (verbose) {
-    cat("Computing DOPE metrics for", n_trajectories, "trajectories...\n")
+    cat("Computing DOE metrics for", n_trajectories, "trajectories...\n")
     cat("==========================================================\n")
   }
 
@@ -481,12 +492,12 @@ compute_multi_DOPE_linear <- function(
   }
 
   # ---- Worker: single trajectory -------------------------------------------
-  compute_single_dope <- function(trajectory_name, pseudotime_vector) {
+  compute_single_doe <- function(trajectory_name, pseudotime_vector) {
     if (verbose) cat("\n--- Processing trajectory:", trajectory_name, "---\n")
 
     tryCatch(
       {
-        res <- compute_single_DOPE_linear(
+        res <- compute_single_DOE_linear(
           expr_or_seurat   = expr_or_seurat,
           pseudotime       = pseudotime_vector,
           naive_markers    = naive_markers,
@@ -502,7 +513,8 @@ compute_multi_DOPE_linear <- function(
           branch_include   = branch_include,
           branch_exclude   = branch_exclude,
           branch_min_cells = branch_min_cells,
-          drop_unused_levels = drop_unused_levels
+          drop_unused_levels = drop_unused_levels,
+          tol               = tol
         )
         res$trajectory_name <- trajectory_name
         res
@@ -514,7 +526,7 @@ compute_multi_DOPE_linear <- function(
           D = list(D_naive = NA, D_term = NA),
           O = list(O = NA),
           E = list(E_naive = NA, E_term = NA, E_comp = NA),
-          DOPE_score = NA,
+          DOE_score = NA,
           errors = list(
             D_error = e$message,
             O_error = e$message,
@@ -533,9 +545,9 @@ compute_multi_DOPE_linear <- function(
     parallel::clusterExport(
       cl,
       varlist = c(
-        "compute_single_dope", "metrics_D", "metrics_O", "metrics_E",
+        "compute_single_doe", "metrics_D", "metrics_O", "metrics_E",
         ".get_expr", ".per_cell_score", ".align_to_cells", "subset_by_clusters",
-        "%||%", ".has_formal"
+        "%||%", ".has_formal", "tol"
       ),
       envir = environment()
     )
@@ -547,14 +559,14 @@ compute_multi_DOPE_linear <- function(
       cl, idxs,
       function(i) {
         nm <- names(pseudotime_list)[i]
-        compute_single_dope(nm, pseudotime_list[[i]])
+        compute_single_doe(nm, pseudotime_list[[i]])
       }
     )
     names(trajectory_results) <- names(pseudotime_list)
 
   } else {
     trajectory_results <- Map(
-      compute_single_dope,
+      compute_single_doe,
       names(pseudotime_list),
       pseudotime_list
     )
@@ -564,9 +576,9 @@ compute_multi_DOPE_linear <- function(
   # ---- Summarize & pick best ------------------------------------------------
   comparison_summary <- create_comparison_summary(trajectory_results)
 
-  valid_scores <- comparison_summary$DOPE_score[!is.na(comparison_summary$DOPE_score)]
+  valid_scores <- comparison_summary$DOE_score[!is.na(comparison_summary$DOE_score)]
   best_trajectory <- if (length(valid_scores) > 0) {
-    comparison_summary$trajectory[which.max(comparison_summary$DOPE_score)]
+    comparison_summary$trajectory[which.max(comparison_summary$DOE_score)]
   } else {
     NA_character_
   }
@@ -585,16 +597,16 @@ compute_multi_DOPE_linear <- function(
       branch_min_cells = branch_min_cells
     )
   )
-  class(multi_results) <- "multi_dope_results"
+  class(multi_results) <- "multi_doe_results"
 
   if (verbose) {
     cat("\n==========================================================\n")
-    cat("Multi-trajectory DOPE analysis complete!\n")
+    cat("Multi-trajectory DOE analysis complete!\n")
     if (!is.na(best_trajectory)) {
-      best_score <- comparison_summary$DOPE_score[
+      best_score <- comparison_summary$DOE_score[
         comparison_summary$trajectory == best_trajectory
       ]
-      cat(sprintf("Best trajectory: %s (DOPE score: %.3f)\n",
+      cat(sprintf("Best trajectory: %s (DOE score: %.3f)\n",
                   best_trajectory, best_score))
     }
   }
@@ -606,17 +618,17 @@ compute_multi_DOPE_linear <- function(
 
 
 
-#' Plot DOPE Metrics Comparison Across Trajectories
+#' Plot DOE Metrics Comparison Across Trajectories
 #'
-#' Generate visualizations of DOPE metrics from a multi-trajectory comparison.
+#' Generate visualizations of DOE metrics from a multi-trajectory comparison.
 #' Supports bar plots, radar charts, and heatmaps for intuitive comparison
 #' across multiple trajectory inference methods.
 #'
-#' @param multi_dope_results A list-like object containing a `comparison_summary`
+#' @param multi_doe_results A list-like object containing a `comparison_summary`
 #'   data frame. Must include a column named `"trajectory"` and columns for the
 #'   specified metrics.
 #' @param metrics Character vector of metric names to plot. Defaults to
-#'   \code{c("D_naive","D_term","O","E_naive","E_term","DOPE_score")}.
+#'   \code{c("D_naive","D_term","O","E_naive","E_term","DOE_score")}.
 #' @param type Character string indicating the plot type. One of:
 #'   \code{"bar"} (default), \code{"radar"}, or \code{"heatmap"}.
 #'
@@ -638,16 +650,17 @@ compute_multi_DOPE_linear <- function(
 #' @examples
 #' \dontrun{
 #' # Example with comparison_summary data
-#' plot.multi_dope_results(multi_dope_results, type = "bar")
-#' plot.multi_dope_results(multi_dope_results, type = "radar")
-#' plot.multi_dope_results(multi_dope_results, type = "heatmap")
+#' plot.multi_doe_results(multi_doe_results, type = "bar")
+#' plot.multi_doe_results(multi_doe_results, type = "radar")
+#' plot.multi_doe_results(multi_doe_results, type = "heatmap")
 #' }
 #'
-plot.multi_dope_results <- function(multi_dope_results,
-                                    metrics = c("D_naive","D_term","O","E_naive","E_term","DOPE_score"),
+#' @export
+plot.multi_doe_results <- function(multi_doe_results,
+                                    metrics = c("D_naive","D_term","O","E_naive","E_term","DOE_score"),
                                     type = "bar") {
   if (!requireNamespace("ggplot2", quietly = TRUE)) stop("ggplot2 package required for plotting")
-  plot_data <- multi_dope_results$comparison_summary[, c("trajectory", metrics), drop = FALSE]
+  plot_data <- multi_doe_results$comparison_summary[, c("trajectory", metrics), drop = FALSE]
 
   if (type == "bar") {
     if (!requireNamespace("reshape2", quietly = TRUE)) stop("reshape2 package required for bar plots")
@@ -657,7 +670,7 @@ plot.multi_dope_results <- function(multi_dope_results,
         ggplot2::geom_col(position = "dodge") +
         ggplot2::theme_minimal() +
         ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
-        ggplot2::labs(title = "DOPE Metrics Comparison Across Trajectories", x = "Trajectory Method", y = "Score") +
+        ggplot2::labs(title = "DOE Metrics Comparison Across Trajectories", x = "Trajectory Method", y = "Score") +
         ggplot2::ylim(0, 1)
     )
   } else if (type == "radar") {
@@ -674,7 +687,7 @@ plot.multi_dope_results <- function(multi_dope_results,
       layout(matrix(c(1,2), ncol = 2), widths = c(3,1))
       fmsb::radarchart(radar_data, axistype = 1, pcol = line_colors, pfcol = colors, plwd = 2, plty = 1,
                        cglcol = "grey", cglty = 1, axislabcol = "grey", caxislabels = rep("",5),
-                       cglwd = 0.5, vlcex = 0, title = "DOPE Metrics Radar Chart")
+                       cglwd = 0.5, vlcex = 0, title = "DOE Metrics Radar Chart")
       par(mar = c(0,0,0,0)); plot.new()
       legend("center", legend = plot_data$trajectory, col = line_colors, lty = 1, lwd = 2, cex = 0.8, bty = "n")
       layout(1)
@@ -691,7 +704,7 @@ plot.multi_dope_results <- function(multi_dope_results,
         ggplot2::theme_minimal() +
         ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
                        plot.title = ggplot2::element_text(hjust = 0.5)) +
-        ggplot2::labs(title = "DOPE Metrics Heatmap", x = "Metric", y = "Trajectory Method") +
+        ggplot2::labs(title = "DOE Metrics Heatmap", x = "Metric", y = "Trajectory Method") +
         ggplot2::geom_text(ggplot2::aes(label = ifelse(is.na(score), "NA", sprintf("%.2f", score))),
                            color = "black", size = 3)
     )

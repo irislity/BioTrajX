@@ -1,22 +1,34 @@
 Package: BioTrajX
-Title: What the Package Does (One Line, Title Case)
+Title: Directionality, Order, Endpoint Metrics for Trajectory Analysis
 Version: 0.0.0.9000
 Authors@R: 
     person("Iris", "Li", , "irisliarbeit@gmail.com", role = c("aut", "cre"),
            comment = c(ORCID = "0009-0008-6695-3820"))
-Description: What the package does (one paragraph).
+Description: BioTrajX implements the DOE (Directionality, Order, Endpoint)
+    metrics for benchmarking and comparing single-cell pseudotime trajectories.
+    It provides high-level wrappers for linear and branched trajectories,
+    visualization helpers, and utilities for ranking methods. The package can
+    be installed directly from GitHub and comes with pkgdown documentation for
+    quick reference.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
-Suggests: 
+Imports:
+    ggplot2
+Suggests:
+    usethis,
+    roxygen2,
     Seurat,
     AnnotationDbi,
     org.Hs.eg.db,
     msigdbr,
     parallel,
     knitr,
-    rmarkdown
+    rmarkdown,
+    reshape2,
+    fmsb,
+    pkgdown
 URL: https://github.com/irislity/BioTrajX
 BugReports: https://github.com/irislity/BioTrajX/issues
 VignetteBuilder: knitr

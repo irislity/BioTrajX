@@ -5,29 +5,28 @@
 \alias{BioTrajX}
 \title{BioTrajX: Trajectory Evaluation Metrics for Single-Cell Data}
 \description{
-Compute the core DOPE metrics (Directionality, Order, Endpoints validity)
+Compute the core DOE metrics (Directionality, Order, Endpoints validity)
 for multiple pseudotime trajectories in a single function call. This function loops through
-each provided pseudotime and computes DOPE metrics, allowing comparison across different
+each provided pseudotime and computes DOE metrics, allowing comparison across different
 trajectory inference methods or parameters. Supports linear or branched trajectories; for
 branched analyses, cells can be subset using cluster labels before metric computation.
 }
 \details{
 BioTrajX provides tools to assess pseudotime and trajectory inference outputs
-using biologically grounded expectations. It implements the DOPE metrics
+using biologically grounded expectations. It implements the DOE metrics
 (Directionality, Order Consistency, Endpoint Validity) and
 includes plotting utilities for visualization.
 }
-\section{\subsection{Main Functions}{
-}{
+\section{Main Functions}{
 \itemize{
-\item 
-\item 
-\item 
-}
+\item \code{compute_single_DOE_linear()} – score a single linear trajectory.
+\item \code{compute_multi_DOE_linear()} – compare multiple linear trajectories.
+\item \code{compute_single_DOE_branched()} – score a branched trajectory.
+\item \code{compute_multi_DOE_branched()} – compare branched trajectories.
 }
 }
 
-\section{Individual DOPE Functions}{
+\section{Individual DOE Functions}{
 
 \itemize{
 \item \code{metrics_D()} : Directionality

@@ -94,8 +94,8 @@ pseudotime_methods <- list(
 expr <- as.matrix(GetAssayData(seu, layer = "data"))
 
 # Compare all methods
-results <- compute_multi_DOPE(
-  expr = expr,
+results <- compute_multi_DOE_linear(
+  expr_or_seurat = expr,
   pseudotime_list = pseudotime_methods,
   naive_markers = stem_progenitor_genes ,
   tol = 0.01,
@@ -105,25 +105,25 @@ results <- compute_multi_DOPE(
 
 
 
-plot.multi_dope_results (results, type = "bar")
+plot.multi_doe_results(results, type = "bar")
 
-plot.multi_dope_results (results, type = "radar")
+plot.multi_doe_results(results, type = "radar")
 ```
 
 ```{r}
-results <- compute_multi_DOPE(
-  expr = seu,
+results <- compute_multi_DOE_linear(
+  expr_or_seurat = seu,
   pseudotime_list = pseudotime_methods,
   naive_markers = stem_progenitor_genes ,
   terminal_markers = erythrocyte_genes,
   E_method = "gmm", plot_E = T
 )
 
-plot.multi_dope_results (results, type = "bar")
+plot.multi_doe_results(results, type = "bar")
 
-plot.multi_dope_results (results, type = "radar")
+plot.multi_doe_results(results, type = "radar")
 
-plot.multi_dope_results(results, type = "heatmap")
+plot.multi_doe_results(results, type = "heatmap")
 ```
 
 
@@ -141,7 +141,7 @@ branch_filters <- list(
  Stem_to_Ery = list(include = c("Stem_Progenitors","Megakaryocyte_progenitors", "Erythroid_progenitors_Erythroblasts", "Erythrocytes"), min_cells = 50),
   Stem_to_B = list(include = c("Stem_Progenitors","Immature_B", "Mature_B"), min_cells = 50))
 
-res_multi <- compute_multi_DOPE_branched(
+res_multi <- compute_multi_DOE_branched(
   expr_or_seurat = seu,
   pseudotime_list = pseudotime_methods,
   naive_markers_list = naive_markers_list,
@@ -153,6 +153,6 @@ res_multi <- compute_multi_DOPE_branched(
 ```
 
 ```{r}
-plot.multi_dope_results (res_multi, type="bar")
+plot.multi_doe_branched(res_multi, type="bar")
 ```
 

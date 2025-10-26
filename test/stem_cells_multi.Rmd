@@ -54,7 +54,7 @@ pseudotime_methods <- list(
 expr <- as.matrix(GetAssayData(seu, layer = "data"))
 
 
-results <- compute_multi_DOPE_linear(
+results <- compute_multi_DOE_linear(
   expr = expr,
   pseudotime_list = pseudotime_methods,
   naive_markers = stem_progenitor_genes ,
@@ -64,10 +64,10 @@ results <- compute_multi_DOPE_linear(
 )
 ```
 ```{r}
-plot.multi_dope_results (results, type = "bar")
+plot.multi_doe_results (results, type = "bar")
 
-plot.multi_dope_results (results, type = "radar")
-plot.multi_dope_results (results, type = "heatmap")
+plot.multi_doe_results (results, type = "radar")
+plot.multi_doe_results (results, type = "heatmap")
 ```
 
 Selecting the erythrocyte and B cell lineages 
@@ -85,7 +85,7 @@ branch_filters <- list(
  Stem_to_Ery = list(include = c("Stem_Progenitors","Megakaryocyte_progenitors", "Erythroid_progenitors_Erythroblasts", "Erythrocytes"), min_cells = 50),
   Stem_to_B = list(include = c("Stem_Progenitors","Immature_B", "Mature_B"), min_cells = 50))
 
-res_multi <- compute_multi_DOPE_branched(
+res_multi <- compute_multi_DOE_branched(
   expr_or_seurat = seu,
   pseudotime_list = pseudotime_methods,
   naive_markers_list = naive_markers_list,
@@ -96,7 +96,7 @@ res_multi <- compute_multi_DOPE_branched(
 )
 ```
 ```{r}
-res_single_br <- compute_single_DOPE_branched(
+res_single_br <- compute_single_DOE_branched(
   expr_or_seurat = seu,
   pseudotime = pseudotime_methods$monocle3,
   naive_markers_list = naive_markers_list,
@@ -107,25 +107,25 @@ res_single_br <- compute_single_DOPE_branched(
 )
 ```
 ```{r}
-plot.multi_dope_results_branched(res_multi, branch_mode= "facet")
+plot.multi_doe_branched(res_multi, branch_mode= "facet")
 ```
 ```{r}
 res <- res_multi
 
-# 1) Overall aggregate DOPE across trajectories
-plot.multi_dope_results_branched(res, scope = "overall", type = "bar")
+# 1) Overall aggregate DOE across trajectories
+plot.multi_doe_branched(res, scope = "overall", type = "bar")
 
 # 2) Per-branch bar plot, faceted by branch
-plot.multi_dope_results_branched(res, scope = "branch",
-                                 metrics = c("D_naive","D_term","O","E_naive", "E_term","DOPE_score"),
+plot.multi_doe_branched(res, scope = "branch",
+                                 metrics = c("D_naive","D_term","O","E_naive", "E_term","DOE_score"),
                                  type = "bar", branch_mode = "facet")
 
 # 3) Per-branch heatmap with stacked labels "trajectory [branch]"
-plot.multi_dope_results_branched(res, scope = "branch",
+plot.multi_doe_branched(res, scope = "branch",
                                  type = "heatmap", branch_mode = "stack")
 
 # 4) Separate radar per branch
-plot.multi_dope_results_branched(res, scope = "branch",
+plot.multi_doe_branched(res, scope = "branch",
                                  type = "radar", branch_mode = "separate")
 
 
