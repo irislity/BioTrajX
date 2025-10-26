@@ -58,10 +58,8 @@ results <- compute_multi_DOPE_linear(
   expr = expr,
   pseudotime_list = pseudotime_methods,
   naive_markers = stem_progenitor_genes ,
-  species = "Mus musculus",
   tol = 0.01,
   terminal_markers = erythrocyte_genes,
-  pathways = c("mmu04640"),
   E_method = "gmm", plot_E = T
 )
 ```
@@ -83,11 +81,6 @@ terminal_markers_list <- list(
  Stem_to_Ery = erythrocyte_genes,
  Stem_to_B = c("Cd19","Cd79a","Cd79b","Ms4a1","Cd22","Cr2","Fcer2a","Pax5","Ebf1","Irf4"))
 
-pathways_list <- list(
-   Stem_to_Ery = c("mmu04640"),
-   Stem_to_B = c("mmu04662")
-)
-
 branch_filters <- list(
  Stem_to_Ery = list(include = c("Stem_Progenitors","Megakaryocyte_progenitors", "Erythroid_progenitors_Erythroblasts", "Erythrocytes"), min_cells = 50),
   Stem_to_B = list(include = c("Stem_Progenitors","Immature_B", "Mature_B"), min_cells = 50))
@@ -97,11 +90,8 @@ res_multi <- compute_multi_DOPE_branched(
   pseudotime_list = pseudotime_methods,
   naive_markers_list = naive_markers_list,
   terminal_markers_list = terminal_markers_list,
-  pathways_list = pathways_list,
   cluster_labels = "Phenotype",
   branch_filters = branch_filters,
-  id_type = "SYMBOL",
-  species = "Mus musculus",
   verbose = TRUE
 )
 ```
@@ -111,11 +101,8 @@ res_single_br <- compute_single_DOPE_branched(
   pseudotime = pseudotime_methods$monocle3,
   naive_markers_list = naive_markers_list,
   terminal_markers_list = terminal_markers_list,
-  pathways_list = pathways_list,
   cluster_labels = "Phenotype",
   branch_filters = branch_filters,
-  id_type = "SYMBOL",
-  species = "Mus musculus",
   verbose = TRUE
 )
 ```
@@ -130,7 +117,7 @@ plot.multi_dope_results_branched(res, scope = "overall", type = "bar")
 
 # 2) Per-branch bar plot, faceted by branch
 plot.multi_dope_results_branched(res, scope = "branch",
-                                 metrics = c("D_naive","D_term","O","P","E_naive", "E_term","DOPE_score"),
+                                 metrics = c("D_naive","D_term","O","E_naive", "E_term","DOPE_score"),
                                  type = "bar", branch_mode = "facet")
 
 # 3) Per-branch heatmap with stacked labels "trajectory [branch]"

@@ -2,11 +2,11 @@
 #'
 #' BioTrajX provides tools to assess pseudotime and trajectory inference outputs
 #' using biologically grounded expectations. It implements the DOPE metrics
-#' (Directionality, Order Consistency, Program Coherence, Endpoint Validity),
+#' (Directionality, Order Consistency, Endpoint Validity) and
 #' includes plotting utilities for visualization.
 #'
 #' @description
-#' Compute all four DOPE metrics (Directionality, Order, Program coherence, Endpoints validity)
+#' Compute the core DOPE metrics (Directionality, Order, Endpoints validity)
 #' for multiple pseudotime trajectories in a single function call. This function loops through
 #' each provided pseudotime and computes DOPE metrics, allowing comparison across different
 #' trajectory inference methods or parameters. Supports linear or branched trajectories; for
@@ -21,7 +21,6 @@
 #' @section Individual DOPE Functions:
 #' - `metrics_D()` : Directionality
 #' - `metrics_O()` : Order consistency
-#' - `metrics_P()` : Program coherence
 #' - `metrics_E()` : Endpoint validity
 #'
 #'

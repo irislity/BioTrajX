@@ -30,35 +30,14 @@ clusters for \code{E} when \code{E_method \%in\% c("clusters","combined")}.}
 \item{terminal_clusters}{Character vector of cluster names defining terminal
 clusters for \code{E} when \code{E_method \%in\% c("clusters","combined")}.}
 
-\item{pathways}{Optional pathway resource passed to \code{metrics_P()}; typically a
-list or database handle understood by that function.}
-
-\item{gene_sets}{Optional named list of gene sets (each a character vector)
-used by \code{metrics_P()} to compute program coherence.}
-
 \item{E_method}{One of \code{"gmm"}, \code{"clusters"}, or \code{"combined"}. Controls how
 endpoint validity is estimated inside \code{metrics_E()}.}
-
-\item{id_type}{Identifier type for genes used in pathway/gene-set lookups;
-one of \code{"SYMBOL"}, \code{"ENSEMBL"}, or \code{"ENTREZID"}. Default \code{"SYMBOL"}.}
-
-\item{species}{Species string for pathway/gene-set lookup (default
-\code{"Homo sapiens"}).}
 
 \item{assay}{Assay name to pull from a Seurat object (defaults to
 \code{Seurat::DefaultAssay(x)} when \code{NULL}).}
 
 \item{slot}{Slot to pull from a Seurat assay; typically \code{"data"} (default),
 \code{"counts"}, or \code{"scale.data"}.}
-
-\item{min_remaining}{Minimum number of genes remaining in a module/gene set
-after filtering inside \code{metrics_P()} (default \code{10}).}
-
-\item{min_fraction}{Minimum fraction of genes from a module that must remain
-after filtering in \code{metrics_P()} (default \code{0.20}).}
-
-\item{min_genes_per_module}{Minimum size of a gene set/module considered by
-\code{metrics_P()} (default \code{3}).}
 
 \item{plot_E}{Logical; if \code{TRUE}, allow \code{metrics_E()} to produce diagnostic
 density plots when using the GMM mode (default \code{TRUE}).}
@@ -77,15 +56,14 @@ An object of class \code{"dope_results"}, a list with elements:
 \describe{
 \item{$D$}{List with \code{D_naive}, \code{D_term}.}
 \item{$O$}{List with scalar \code{O}.}
-\item{$P$}{List with scalar \code{P}.}
 \item{$E$}{List with \code{E_naive}, \code{E_term}, and composite \code{E_comp}.}
 \item{$DOPE_score$}{Scalar mean over available component scores.}
-\item{$errors$}{List of caught error messages for D/O/P/E (may be \code{NULL}).}
+\item{$errors$}{List of caught error messages for D/O/E (may be \code{NULL}).}
 }
 }
 \description{
-High-level convenience wrapper that computes the four DOPE components—
-Directionality (D), Order consistency (O), Program coherence (P), and
+High-level convenience wrapper that computes the DOPE components—
+Directionality (D), Order consistency (O), and
 Endpoints validity (E)—for a single trajectory. Works with either a
 \strong{Seurat} object (pulling assay data via \code{GetAssayData}) or an expression
 matrix-like input (dense \code{matrix}, \code{dgCMatrix}, or \code{data.frame} with genes in
@@ -99,8 +77,7 @@ The wrapper:
 current cell order.
 \item Optionally subsets to a specified branch for \code{"branched"} trajectories.
 \item Computes D via \code{metrics_D()}, O via \code{metrics_O()} (passing \code{tol}
-when supported), P via \code{metrics_P()} (using \code{pathways}/\code{gene_sets}),
-and E via \code{metrics_E()} (controlled by \code{E_method}, \code{plot_E}, and
+when supported), and E via \code{metrics_E()} (controlled by \code{E_method}, \code{plot_E}, and
 optional cluster specification).
 \item Aggregates a scalar \code{DOPE_score} as the mean of available component
 scores (ignoring \code{NA}s).
@@ -113,7 +90,7 @@ sets.
 }
 \note{
 This wrapper relies on the availability and behavior of the helper functions
-\code{metrics_D()}, \code{metrics_O()}, \code{metrics_P()}, and \code{metrics_E()}, as well as
+\code{metrics_D()}, \code{metrics_O()}, and \code{metrics_E()}, as well as
 optional plotting utilities (e.g. \verb{plot_metrics_*}). Ensure these are loaded
 in your package namespace. If working with Seurat inputs, the \strong{Seurat}
 package must be installed and the requested assay/slot must exist.
@@ -126,8 +103,7 @@ res <- compute_single_DOPE_linear(
   pseudotime       = pt,
   naive_markers    = naive,
   terminal_markers = term,
-  E_method         = "gmm",
-  species          = "Homo sapiens"
+  E_method         = "gmm"
 )
 str(res)
 
@@ -135,6 +111,6 @@ str(res)
 
 }
 \seealso{
-\code{metrics_D()}, \code{metrics_O()}, \code{metrics_P()}, \code{metrics_E()},
+\code{metrics_D()}, \code{metrics_O()}, \code{metrics_E()},
 \code{subset_by_clusters()}
 }

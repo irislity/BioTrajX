@@ -27,7 +27,6 @@
       D_naive      = res$D$D_naive %||% NA_real_,
       D_term       = res$D$D_term  %||% NA_real_,
       O            = res$O$O       %||% NA_real_,
-      P            = res$P$P       %||% NA_real_,
       E_naive      = res$E$E_naive %||% NA_real_,
       E_term       = res$E$E_term  %||% NA_real_,
       E_comp       = res$E$E_comp  %||% NA_real_,
@@ -59,22 +58,14 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
                                          pseudotime,
                                          naive_markers_list,
                                          terminal_markers_list,
-                                         pathways_list = NULL,
-                                         gene_sets_list = NULL,
                                          cluster_labels = NULL,
                                          branch_filters = NULL,
                                          E_method = c("gmm","clusters","combined"),
-                                         id_type = c("SYMBOL","ENSEMBL","ENTREZID"),
-                                         species = "Homo sapiens",
                                          assay = NULL,
                                          slot = "data",
-                                         min_remaining = 10,
-                                         min_fraction  = 0.20,
-                                         min_genes_per_module = 3,
                                          plot_E = FALSE,
                                          verbose = TRUE) {
   E_method <- match.arg(E_method)
-  id_type  <- match.arg(id_type)
 
   # ---- Branch sanity ----
   branch_names <- union(names(naive_markers_list), names(terminal_markers_list))
@@ -83,13 +74,6 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
   }
   .stop_if_missing(naive_markers_list,    branch_names, "naive_markers_list")
   .stop_if_missing(terminal_markers_list, branch_names, "terminal_markers_list")
-  if (!is.null(pathways_list))  .stop_if_missing(pathways_list,  branch_names, "pathways_list")
-  if (!is.null(gene_sets_list)) .stop_if_missing(gene_sets_list, branch_names, "gene_sets_list")
-
-  if (!is.null(pathways_list) && !is.null(gene_sets_list)) {
-    warning("Both pathways_list and gene_sets_list provided; gene_sets_list will take precedence for P metric.")
-  }
-
   # ---- Expression extraction ----
   is_seurat <- inherits(expr_or_seurat, "Seurat")
   if (is_seurat) {
@@ -168,9 +152,6 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
 
     naive_markers    <- naive_markers_list[[b]]
     terminal_markers <- terminal_markers_list[[b]]
-    gene_sets        <- if (!is.null(gene_sets_list))  gene_sets_list[[b]]  else NULL
-    pathways         <- if (!is.null(pathways_list))   pathways_list[[b]]   else NULL
-
     # ---- D ----
     D_res <- tryCatch({
       metrics_D(sub$expr, naive_markers, terminal_markers, sub$pt)
@@ -184,22 +165,6 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
         metrics_O(sub$expr, naive_markers, terminal_markers, sub$pt)
       }
     }, error = function(e) list(O=NA_real_, error=e$message))
-
-    # ---- P (gene_sets wins) ----
-    P_res <- tryCatch({
-      metric_P(
-        module_score   = sub$expr,       # or sub$module_score depending on structure
-        pseudotime     = sub$pt,
-        threshold      = "quantile",     # or "mean_sd"
-        q              = 0.8,
-        alpha          = 0.5,
-        soft_sigma     = "mad",
-        k_sigma        = 1.0,
-        M              = 500,
-        n_bins         = 10,
-        seed           = 1L
-      )
-    }, error = function(e) list(P = NA_real_, error = e$message))
 
     # ---- E ----
     # robust colMeans: handle empty overlaps to avoid numeric(0)
@@ -225,7 +190,6 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
     comp_vec <- c(D_res$D_naive %||% NA_real_,
                   D_res$D_term  %||% NA_real_,
                   O_res$O       %||% NA_real_,
-                  P_res$P       %||% NA_real_,
                   E_res$E_comp  %||% NA_real_)
     score <- if (all(is.na(comp_vec))) NA_real_ else mean(comp_vec, na.rm = TRUE)
 
@@ -233,7 +197,7 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
     list(
       branch = b,
       n_cells = ncol(sub$expr),
-      D = D_res, O = O_res, P = P_res, E = E_res,
+      D = D_res, O = O_res, E = E_res,
       DOPE_score = score,
       cells = sub$cells
     )
@@ -253,9 +217,7 @@ compute_single_DOPE_branched <- function(expr_or_seurat,
     aggregate_DOPE = agg,                 # overall
     weights = w,                          # branch cell counts
     n_cells_total = sum(w),
-    params = list(E_method=E_method, id_type=id_type, species=species,
-                  min_remaining=min_remaining, min_fraction=min_fraction,
-                  min_genes_per_module=min_genes_per_module)
+    params = list(E_method=E_method)
   )
 
 }
@@ -267,25 +229,17 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
                                         pseudotime_list,
                                         naive_markers_list,
                                         terminal_markers_list,
-                                        pathways_list = NULL,
-                                        gene_sets_list = NULL,
                                         cluster_labels = NULL,
                                         branch_filters = NULL,
                                         E_method = c("gmm","clusters","combined"),
-                                        id_type = c("SYMBOL","ENSEMBL","ENTREZID"),
-                                        species = "Homo sapiens",
                                         assay = NULL,
                                         slot  = "data",
-                                        min_remaining = 10,
-                                        min_fraction  = 0.20,
-                                        min_genes_per_module = 3,
                                         plot_E = FALSE,
                                         verbose = TRUE,
                                         parallel = FALSE,
                                         n_cores = NULL) {
 
   E_method <- match.arg(E_method)
-  id_type  <- match.arg(id_type)
 
   if (!is.list(pseudotime_list)) stop("pseudotime_list must be a named list.")
   if (is.null(names(pseudotime_list)))
@@ -298,18 +252,11 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
       pseudotime = pt,
       naive_markers_list = naive_markers_list,
       terminal_markers_list = terminal_markers_list,
-      pathways_list = pathways_list,
-      gene_sets_list = gene_sets_list,
       cluster_labels = cluster_labels,
       branch_filters = branch_filters,
       E_method = E_method,
-      id_type = id_type,
-      species = species,
       assay = assay,
       slot = slot,
-      min_remaining = min_remaining,
-      min_fraction = min_fraction,
-      min_genes_per_module = min_genes_per_module,
       plot_E = plot_E,
       verbose = verbose
     )
@@ -407,7 +354,7 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
     best_per_branch = best_per_branch,            # columns: branch, best_trajectory, best_score
     branch_comparisons = branch_comparisons,      # per-branch sorted tables (DOPE_score)
     branch_data = branch_data,                    # branch -> trajectory -> raw branch object
-    args = list(E_method=E_method, id_type=id_type, species=species,
+    args = list(E_method=E_method,
                 parallel=parallel, n_cores=n_cores)
   )
 
@@ -455,7 +402,7 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
 #'   DOPE scores across trajectories, or `"branch"` to plot per-branch
 #'   metrics. Default is `"branch"`.
 #' @param metrics Character vector of metric names to plot. Common options
-#'   include `"D_naive"`, `"D_term"`, `"O"`, `"P"`, `"E_naive"`,
+#'   include `"D_naive"`, `"D_term"`, `"O"`, `"E_naive"`,
 #'   `"E_term"`, and `"DOPE_score"`. Defaults to all of these.
 #' @param type Character scalar, plot type: `"bar"`, `"heatmap"`,
 #'   or `"radar"`.
@@ -484,7 +431,7 @@ compute_multi_DOPE_branched <- function(expr_or_seurat,
 #' @examples
 plot.multi_dope_results_branched <- function(multi_dope_branched,
                                              scope = c("branch","overall"),
-                                             metrics = c("D_naive","D_term","O","P","E_naive","E_term","DOPE_score"),
+                                             metrics = c("D_naive","D_term","O","E_naive","E_term","DOPE_score"),
                                              type = c("bar","heatmap","radar"),
                                              branch_mode = c("facet","stack","separate"),
                                              branches = NULL) {
@@ -517,7 +464,6 @@ plot.multi_dope_results_branched <- function(multi_dope_branched,
            "D_naive"   = num1(obj$D$D_naive %||% obj$D_naive %||% obj$D$naive),
            "D_term"    = num1(obj$D$D_term  %||% obj$D_term  %||% obj$D$terminal),
            "O"         = num1(obj$O$O       %||% obj$O),
-           "P"         = num1(obj$P$P       %||% obj$P),
            "E_naive"   = num1(obj$E$E_naive %||% obj$E_naive %||% obj$E$naive),
            "E_term"    = num1(obj$E$E_term  %||% obj$E_term  %||% obj$E$terminal),
            "DOPE_score"= num1(obj$DOPE_score %||% obj$DOPE %||% obj$score),

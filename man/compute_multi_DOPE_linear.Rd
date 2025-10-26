@@ -12,16 +12,9 @@ compute_multi_DOPE_linear(
   cluster_labels = NULL,
   naive_clusters = NULL,
   terminal_clusters = NULL,
-  pathways = NULL,
-  gene_sets = NULL,
   E_method = c("gmm", "clusters", "combined"),
-  id_type = c("SYMBOL", "ENSEMBL", "ENTREZID"),
-  species = "Homo sapiens",
   assay = NULL,
   slot = "data",
-  min_remaining = 10,
-  min_fraction = 0.2,
-  min_genes_per_module = 3,
   plot_E = TRUE,
   verbose = TRUE,
   parallel = FALSE,
@@ -43,7 +36,7 @@ vectors (one per trajectory). Each vector must have length equal to the
 number of columns/cells of \code{expr_or_seurat} (after extraction).}
 
 \item{naive_markers}{Character vector of gene symbols/IDs for naïve/early
-programs (used by D/O/E/P as relevant).}
+programs (used by D/O/E as relevant).}
 
 \item{terminal_markers}{Character vector of gene symbols/IDs for terminal/late
 programs.}
@@ -57,33 +50,14 @@ naïve (E Case 2 / cluster-based).}
 \item{terminal_clusters}{Optional character vector of cluster names considered
 terminal (E Case 2 / cluster-based).}
 
-\item{pathways}{Optional list of pathway name → gene vector (used by P).}
-
-\item{gene_sets}{Optional list of additional gene sets name → gene vector
-(also used by P).}
-
 \item{E_method}{Endpoints validity method. One of \code{"gmm"}, \code{"clusters"},
 or \code{"combined"}. See \code{\link[=compute_single_DOPE_linear]{compute_single_DOPE_linear()}} for details.}
-
-\item{id_type}{Gene identifier type for markers/pathways. One of
-\code{"SYMBOL"}, \code{"ENSEMBL"}, or \code{"ENTREZID"}.}
-
-\item{species}{Species name used for ID mapping (e.g., \code{"Homo sapiens"}).}
 
 \item{assay}{If \code{expr_or_seurat} is a Seurat object, the assay to use.
 If \code{NULL}, defaults to \code{Seurat::DefaultAssay()}.}
 
 \item{slot}{If \code{expr_or_seurat} is a Seurat object, the assay slot to
 extract (e.g., \code{"data"}, \code{"counts"}). Default \code{"data"}.}
-
-\item{min_remaining}{Minimum number of genes to retain after filtering
-within sub-steps (safety check).}
-
-\item{min_fraction}{Minimum retained fraction of genes after filtering
-(safety check).}
-
-\item{min_genes_per_module}{Minimum number of genes required per program/
-module to compute stable scores.}
 
 \item{plot_E}{Logical; if \code{TRUE}, produce diagnostic density plots when
 \code{E_method} uses GMM.}
@@ -105,7 +79,7 @@ An object of class \code{"multi_dope_results"} with components:
 \item \code{results}: named list of per-trajectory DOPE results
 (each as returned by \code{compute_single_DOPE_linear()}).
 \item \code{comparison_summary}: \code{data.frame} summarizing
-D/O/P/E and \code{DOPE_score} per trajectory.
+D/O/E and \code{DOPE_score} per trajectory.
 \item \code{best_trajectory}: character scalar with the name of the
 highest-scoring trajectory (or \code{NA} if none valid).
 \item \code{n_trajectories}: integer count.
@@ -114,7 +88,7 @@ highest-scoring trajectory (or \code{NA} if none valid).
 }
 \description{
 Runs the full DOPE pipeline (Directionality \strong{D}, Order consistency \strong{O},
-Program coherence \strong{P}, Endpoints validity \strong{E}, and the combined
+Endpoints validity \strong{E}, and the combined
 \code{DOPE_score}) across \strong{multiple linear} pseudotime vectors sharing the
 same expression object. Results are collected per trajectory and summarized
 in a comparison table with the best trajectory highlighted.

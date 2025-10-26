@@ -7,7 +7,7 @@
 \method{plot}{multi_dope_results_branched}(
   multi_dope_branched,
   scope = c("branch", "overall"),
-  metrics = c("D_naive", "D_term", "O", "P", "E_naive", "E_term", "DOPE_score"),
+  metrics = c("D_naive", "D_term", "O", "E_naive", "E_term", "DOPE_score"),
   type = c("bar", "heatmap", "radar"),
   branch_mode = c("facet", "stack", "separate"),
   branches = NULL
@@ -23,7 +23,7 @@ DOPE scores across trajectories, or \code{"branch"} to plot per-branch
 metrics. Default is \code{"branch"}.}
 
 \item{metrics}{Character vector of metric names to plot. Common options
-include \code{"D_naive"}, \code{"D_term"}, \code{"O"}, \code{"P"}, \code{"E_naive"},
+include \code{"D_naive"}, \code{"D_term"}, \code{"O"}, \code{"E_naive"},
 \code{"E_term"}, and \code{"DOPE_score"}. Defaults to all of these.}
 
 \item{type}{Character scalar, plot type: \code{"bar"}, \code{"heatmap"},

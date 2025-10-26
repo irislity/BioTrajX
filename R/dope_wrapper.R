@@ -1,8 +1,8 @@
 #' Compute DOPE metrics for a single trajectory (linear)
 #'
 #' @description
-#' High-level convenience wrapper that computes the four DOPE components—
-#' Directionality (D), Order consistency (O), Program coherence (P), and
+#' High-level convenience wrapper that computes the DOPE components—
+#' Directionality (D), Order consistency (O), and
 #' Endpoints validity (E)—for a single trajectory. Works with either a
 #' **Seurat** object (pulling assay data via `GetAssayData`) or an expression
 #' matrix-like input (dense `matrix`, `dgCMatrix`, or `data.frame` with genes in
@@ -25,26 +25,12 @@
 #'   clusters for `E` when `E_method %in% c("clusters","combined")`.
 #' @param terminal_clusters Character vector of cluster names defining terminal
 #'   clusters for `E` when `E_method %in% c("clusters","combined")`.
-#' @param pathways Optional pathway resource passed to `metrics_P()`; typically a
-#'   list or database handle understood by that function.
-#' @param gene_sets Optional named list of gene sets (each a character vector)
-#'   used by `metrics_P()` to compute program coherence.
 #' @param E_method One of `"gmm"`, `"clusters"`, or `"combined"`. Controls how
 #'   endpoint validity is estimated inside `metrics_E()`.
-#' @param id_type Identifier type for genes used in pathway/gene-set lookups;
-#'   one of `"SYMBOL"`, `"ENSEMBL"`, or `"ENTREZID"`. Default `"SYMBOL"`.
-#' @param species Species string for pathway/gene-set lookup (default
-#'   `"Homo sapiens"`).
 #' @param assay Assay name to pull from a Seurat object (defaults to
 #'   `Seurat::DefaultAssay(x)` when `NULL`).
 #' @param slot Slot to pull from a Seurat assay; typically `"data"` (default),
 #'   `"counts"`, or `"scale.data"`.
-#' @param min_remaining Minimum number of genes remaining in a module/gene set
-#'   after filtering inside `metrics_P()` (default `10`).
-#' @param min_fraction Minimum fraction of genes from a module that must remain
-#'   after filtering in `metrics_P()` (default `0.20`).
-#' @param min_genes_per_module Minimum size of a gene set/module considered by
-#'   `metrics_P()` (default `3`).
 #' @param plot_E Logical; if `TRUE`, allow `metrics_E()` to produce diagnostic
 #'   density plots when using the GMM mode (default `TRUE`).
 #' @param verbose Logical; if `TRUE`, print diagnostic messages when component
@@ -58,7 +44,7 @@
 #'   \item Aligns `pseudotime` (and `cluster_labels` when provided) to the
 #'         current cell order.
 #'   \item Optionally subsets to a specified branch for `"branched"` trajectories.
-#'   \item Computes D via `metrics_D()`, O via `metrics_O()` , P via `metrics_P()` (using `pathways`/`gene_sets`),
+#'   \item Computes D via `metrics_D()`, O via `metrics_O()`,
 #'         and E via `metrics_E()` (controlled by `E_method`, `plot_E`, and
 #'         optional cluster specification).
 #'   \item Aggregates a scalar `DOPE_score` as the mean of available component
@@ -74,21 +60,20 @@
 #' \describe{
 #'   \item{$D$}{List with `D_naive`, `D_term`.}
 #'   \item{$O$}{List with scalar `O`.}
-#'   \item{$P$}{List with scalar `P`.}
 #'   \item{$E$}{List with `E_naive`, `E_term`, and composite `E_comp`.}
 #'   \item{$DOPE_score$}{Scalar mean over available component scores.}
-#'   \item{$errors$}{List of caught error messages for D/O/P/E (may be `NULL`).}
+#'   \item{$errors$}{List of caught error messages for D/O/E (may be `NULL`).}
 #' }
 #'
 #' @note
 #' This wrapper relies on the availability and behavior of the helper functions
-#' `metrics_D()`, `metrics_O()`, `metrics_P()`, and `metrics_E()`, as well as
+#' `metrics_D()`, `metrics_O()`, and `metrics_E()`, as well as
 #' optional plotting utilities (e.g. `plot_metrics_*`). Ensure these are loaded
 #' in your package namespace. If working with Seurat inputs, the **Seurat**
 #' package must be installed and the requested assay/slot must exist.
 #'
 #' @seealso
-#' `metrics_D()`, `metrics_O()`, `metrics_P()`, `metrics_E()`,
+#' `metrics_D()`, `metrics_O()`, `metrics_E()`,
 #' `subset_by_clusters()`
 #'
 #' @examples
@@ -212,16 +197,9 @@ compute_single_DOPE_linear <- function(expr_or_seurat,
                                        cluster_labels = NULL,
                                        naive_clusters = NULL,
                                        terminal_clusters = NULL,
-                                       pathways = NULL,
-                                       gene_sets = NULL,
                                        E_method = c("gmm", "clusters", "combined"),
-                                       id_type = c("SYMBOL", "ENSEMBL", "ENTREZID"),
-                                       species = "Homo sapiens",
                                        assay = NULL,
                                        slot = "data",
-                                       min_remaining = 10,
-                                       min_fraction = 0.20,
-                                       min_genes_per_module = 3,
                                        plot_E = TRUE,
                                        verbose = FALSE,
                                        branch_include = NULL,
@@ -229,7 +207,6 @@ compute_single_DOPE_linear <- function(expr_or_seurat,
                                        branch_min_cells = 10,
                                        drop_unused_levels = TRUE) {
   E_method   <- match.arg(E_method)
-  id_type    <- match.arg(id_type)
 
   expr <- .get_expr(expr_or_seurat, assay = assay, slot = slot)
   cells_all <- if (inherits(expr_or_seurat, "Seurat")) Seurat::Cells(expr_or_seurat) else colnames(expr)
@@ -274,22 +251,6 @@ compute_single_DOPE_linear <- function(expr_or_seurat,
     if (verbose) message("O metric failed: ", e$message)
     list(O = NA_real_, error = e$message)
   })
-  # ---- P metric
-  P_res <- P_res <- tryCatch({
-    metric_P(
-      module_score   = sub$expr,       # or sub$module_score depending on structure
-      pseudotime     = sub$pt,
-      threshold      = "quantile",     # or "mean_sd"
-      q              = 0.8,
-      alpha          = 0.5,
-      soft_sigma     = "mad",
-      k_sigma        = 1.0,
-      M              = 500,
-      n_bins         = 10,
-      seed           = 1L
-    )
-  }, error = function(e) list(P = NA_real_, error = e$message))
-
   # ---- E metric
   E_res <- tryCatch({
     metrics_E(pseudotime,
@@ -309,7 +270,6 @@ compute_single_DOPE_linear <- function(expr_or_seurat,
     D_res$D_naive %||% NA_real_,
     D_res$D_term  %||% NA_real_,
     O_res$O       %||% NA_real_,
-    P_res$P       %||% NA_real_,
     E_res$E_comp  %||% NA_real_
   )
   DOPE_score <- if (all(is.na(comp_vec))) NA_real_ else mean(comp_vec, na.rm = TRUE)
@@ -317,10 +277,9 @@ compute_single_DOPE_linear <- function(expr_or_seurat,
   out <- list(
     D = list(D_naive = D_res$D_naive %||% NA_real_, D_term = D_res$D_term %||% NA_real_),
     O = list(O = O_res$O %||% NA_real_),
-    P = list(P = P_res$P %||% NA_real_),
     E = list(E_naive = E_res$E_naive %||% NA_real_, E_term = E_res$E_term %||% NA_real_, E_comp = E_res$E_comp %||% NA_real_),
     DOPE_score = DOPE_score,
-    errors = list(D_error = D_res$error, O_error = O_res$error, P_error = P_res$error, E_error = E_res$error)
+    errors = list(D_error = D_res$error, O_error = O_res$error, E_error = E_res$error)
   )
   class(out) <- "dope_results"
 
@@ -328,7 +287,6 @@ compute_single_DOPE_linear <- function(expr_or_seurat,
   plot_metrics_D(pseudotime,D_res)
   plot_metrics_O(expr,pseudotime,O_res,
                  naive_markers,terminal_markers)
-  plot_metrics_P(expr,pseudotime, P_res)
   plot_metrics_E(E_res)
 
   return (out = out)
@@ -347,7 +305,6 @@ create_comparison_summary <- function(trajectory_results) {
     D_naive = numeric(),
     D_term = numeric(),
     O = numeric(),
-    P = numeric(),
     E_naive = numeric(),
     E_term = numeric(),
     E_comp = numeric(),
@@ -366,7 +323,6 @@ create_comparison_summary <- function(trajectory_results) {
       D_naive = result$D$D_naive %||% NA_real_,
       D_term  = result$D$D_term  %||% NA_real_,
       O       = result$O$O       %||% NA_real_,
-      P       = result$P$P       %||% NA_real_,
       E_naive = result$E$E_naive %||% NA_real_,
       E_term  = result$E$E_term  %||% NA_real_,
       E_comp  = result$E$E_comp  %||% NA_real_,
@@ -377,7 +333,7 @@ create_comparison_summary <- function(trajectory_results) {
     summary_data <- rbind(summary_data, row_data)
   }
 
-  metrics <- c("D_naive","D_term","O","P","E_naive","E_term","E_comp","DOPE_score")
+  metrics <- c("D_naive","D_term","O","E_naive","E_term","E_comp","DOPE_score")
   for (metric in metrics) {
     rank_col <- paste0(metric, "_rank")
     summary_data[[rank_col]] <- rank(-summary_data[[metric]], na.last = "keep", ties.method = "min")
@@ -397,7 +353,7 @@ create_comparison_summary <- function(trajectory_results) {
 #'
 #' @description
 #' Runs the full DOPE pipeline (Directionality **D**, Order consistency **O**,
-#' Program coherence **P**, Endpoints validity **E**, and the combined
+#' Endpoints validity **E**, and the combined
 #' `DOPE_score`) across **multiple linear** pseudotime vectors sharing the
 #' same expression object. Results are collected per trajectory and summarized
 #' in a comparison table with the best trajectory highlighted.
@@ -418,7 +374,7 @@ create_comparison_summary <- function(trajectory_results) {
 #'   vectors (one per trajectory). Each vector must have length equal to the
 #'   number of columns/cells of `expr_or_seurat` (after extraction).
 #' @param naive_markers Character vector of gene symbols/IDs for naïve/early
-#'   programs (used by D/O/E/P as relevant).
+#'   programs (used by D/O/E as relevant).
 #' @param terminal_markers Character vector of gene symbols/IDs for terminal/late
 #'   programs.
 #' @param cluster_labels Optional character/factor vector of cluster labels
@@ -427,24 +383,12 @@ create_comparison_summary <- function(trajectory_results) {
 #'   naïve (E Case 2 / cluster-based).
 #' @param terminal_clusters Optional character vector of cluster names considered
 #'   terminal (E Case 2 / cluster-based).
-#' @param pathways Optional list of pathway name → gene vector (used by P).
-#' @param gene_sets Optional list of additional gene sets name → gene vector
-#'   (also used by P).
 #' @param E_method Endpoints validity method. One of `"gmm"`, `"clusters"`,
 #'   or `"combined"`. See [compute_single_DOPE_linear()] for details.
-#' @param id_type Gene identifier type for markers/pathways. One of
-#'   `"SYMBOL"`, `"ENSEMBL"`, or `"ENTREZID"`.
-#' @param species Species name used for ID mapping (e.g., `"Homo sapiens"`).
 #' @param assay If `expr_or_seurat` is a Seurat object, the assay to use.
 #'   If `NULL`, defaults to `Seurat::DefaultAssay()`.
 #' @param slot If `expr_or_seurat` is a Seurat object, the assay slot to
 #'   extract (e.g., `"data"`, `"counts"`). Default `"data"`.
-#' @param min_remaining Minimum number of genes to retain after filtering
-#'   within sub-steps (safety check).
-#' @param min_fraction Minimum retained fraction of genes after filtering
-#'   (safety check).
-#' @param min_genes_per_module Minimum number of genes required per program/
-#'   module to compute stable scores.
 #' @param plot_E Logical; if `TRUE`, produce diagnostic density plots when
 #'   `E_method` uses GMM.
 #' @param verbose Logical; print progress.
@@ -460,7 +404,7 @@ create_comparison_summary <- function(trajectory_results) {
 #'   \item \code{results}: named list of per-trajectory DOPE results
 #'         (each as returned by \code{compute_single_DOPE_linear()}).
 #'   \item \code{comparison_summary}: \code{data.frame} summarizing
-#'         D/O/P/E and \code{DOPE_score} per trajectory.
+#'         D/O/E and \code{DOPE_score} per trajectory.
 #'   \item \code{best_trajectory}: character scalar with the name of the
 #'         highest-scoring trajectory (or \code{NA} if none valid).
 #'   \item \code{n_trajectories}: integer count.
@@ -495,16 +439,9 @@ compute_multi_DOPE_linear <- function(
     cluster_labels      = NULL,
     naive_clusters      = NULL,
     terminal_clusters   = NULL,
-    pathways            = NULL,
-    gene_sets           = NULL,
     E_method            = c("gmm", "clusters", "combined"),
-    id_type             = c("SYMBOL", "ENSEMBL", "ENTREZID"),
-    species             = "Homo sapiens",
     assay               = NULL,
     slot                = "data",
-    min_remaining       = 10,
-    min_fraction        = 0.20,
-    min_genes_per_module = 3,
     plot_E              = TRUE,
     verbose             = TRUE,
     parallel            = FALSE,
@@ -516,7 +453,6 @@ compute_multi_DOPE_linear <- function(
     tol                 = 1e-8
 ) {
   E_method   <- match.arg(E_method)
-  id_type    <- match.arg(id_type)
 
   if (!is.list(pseudotime_list)) {
     stop("pseudotime_list must be a list of pseudotime vectors")
@@ -558,16 +494,9 @@ compute_multi_DOPE_linear <- function(
           cluster_labels   = cluster_labels,
           naive_clusters   = naive_clusters,
           terminal_clusters = terminal_clusters,
-          pathways         = pathways,
-          gene_sets        = gene_sets,
           E_method         = E_method,
-          id_type          = id_type,
-          species          = species,
           assay            = assay,
           slot             = slot,
-          min_remaining    = min_remaining,
-          min_fraction     = min_fraction,
-          min_genes_per_module = min_genes_per_module,
           plot_E           = plot_E,
           verbose          = verbose,
           branch_include   = branch_include,
@@ -584,13 +513,11 @@ compute_multi_DOPE_linear <- function(
           trajectory_name = trajectory_name,
           D = list(D_naive = NA, D_term = NA),
           O = list(O = NA),
-          P = list(P = NA),
           E = list(E_naive = NA, E_term = NA, E_comp = NA),
           DOPE_score = NA,
           errors = list(
             D_error = e$message,
             O_error = e$message,
-            P_error = e$message,
             E_error = e$message
           )
         )
@@ -606,7 +533,7 @@ compute_multi_DOPE_linear <- function(
     parallel::clusterExport(
       cl,
       varlist = c(
-        "compute_single_dope", "metrics_D", "metrics_O", "metrics_P", "metrics_E",
+        "compute_single_dope", "metrics_D", "metrics_O", "metrics_E",
         ".get_expr", ".per_cell_score", ".align_to_cells", "subset_by_clusters",
         "%||%", ".has_formal"
       ),
@@ -651,8 +578,6 @@ compute_multi_DOPE_linear <- function(
     n_trajectories    = n_trajectories,
     method_info = list(
       E_method         = E_method,
-      id_type          = id_type,
-      species          = species,
       parallel         = use_parallel,
       n_cores          = if (use_parallel) n_cores else NA_integer_,
       branch_include   = branch_include,
@@ -691,7 +616,7 @@ compute_multi_DOPE_linear <- function(
 #'   data frame. Must include a column named `"trajectory"` and columns for the
 #'   specified metrics.
 #' @param metrics Character vector of metric names to plot. Defaults to
-#'   \code{c("D_naive","D_term","O","P","E_naive","E_term","DOPE_score")}.
+#'   \code{c("D_naive","D_term","O","E_naive","E_term","DOPE_score")}.
 #' @param type Character string indicating the plot type. One of:
 #'   \code{"bar"} (default), \code{"radar"}, or \code{"heatmap"}.
 #'
@@ -719,7 +644,7 @@ compute_multi_DOPE_linear <- function(
 #' }
 #'
 plot.multi_dope_results <- function(multi_dope_results,
-                                    metrics = c("D_naive","D_term","O","P","E_naive","E_term","DOPE_score"),
+                                    metrics = c("D_naive","D_term","O","E_naive","E_term","DOPE_score"),
                                     type = "bar") {
   if (!requireNamespace("ggplot2", quietly = TRUE)) stop("ggplot2 package required for plotting")
   plot_data <- multi_dope_results$comparison_summary[, c("trajectory", metrics), drop = FALSE]

@@ -6,7 +6,7 @@
 \usage{
 \method{plot}{multi_dope_results}(
   multi_dope_results,
-  metrics = c("D_naive", "D_term", "O", "P", "E_naive", "E_term", "DOPE_score"),
+  metrics = c("D_naive", "D_term", "O", "E_naive", "E_term", "DOPE_score"),
   type = "bar"
 )
 }
@@ -16,7 +16,7 @@ data frame. Must include a column named \code{"trajectory"} and columns for the
 specified metrics.}
 
 \item{metrics}{Character vector of metric names to plot. Defaults to
-\code{c("D_naive","D_term","O","P","E_naive","E_term","DOPE_score")}.}
+\code{c("D_naive","D_term","O","E_naive","E_term","DOPE_score")}.}
 
 \item{type}{Character string indicating the plot type. One of:
 \code{"bar"} (default), \code{"radar"}, or \code{"heatmap"}.}

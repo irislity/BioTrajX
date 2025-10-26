@@ -37,23 +37,6 @@ O <- metrics_O(expr, naive_markers = naive, terminal_markers = term, seu$monocle
 plot_metrics_O(expr,pseudotime = seu$monocle3_pseudotime, O ,naive_markers = naive, terminal_markers = term)
 ```
 ```{r}
-P <- metrics_P(expr,
-              seu$monocle3_pseudotime,
-                      pathways = c("hsa04660","hsa04640"),
-                      naive_markers = naive,
-                      terminal_markers = term,
-                      id_type = c("SYMBOL","ENSEMBL","ENTREZID"),
-                      species = "Homo sapiens",
-                      assay = NULL,
-                      slot  = "data",
-                      min_remaining = 10,
-                      min_fraction  = 0.20,
-                      min_genes_per_module = 3,
-                      verbose = TRUE)
-
-plot_metrics_P(expr,seu$monocle3_pseudotime, P)
-```
-```{r}
 E <- metrics_E(seu$monocle3_pseudotime,
               naive_marker_scores = D$s_i_naive,
               terminal_marker_scores = D$s_i_term,
@@ -66,8 +49,7 @@ plot_metrics_E(E)
 res_single <- compute_single_DOPE_linear(seu,
                     seu$slingshot_pseudotime,
                     naive_markers = naive,
-                    terminal_markers = term, 
-                    pathways = c("hsa04660","hsa04640"))
+                    terminal_markers = term)
 ```
 ```{r}
 pseudotime_methods <- list(
@@ -79,8 +61,7 @@ pseudotime_methods <- list(
 res<- compute_multi_DOPE_linear(expr,
                           pseudotime_list = pseudotime_methods,
                           naive_markers = naive,
-                          terminal_markers =term,
-                          pathways = c("hsa04660","hsa04640"))
+                          terminal_markers =term)
 ```
 ```{r}
 plot.multi_dope_results(res, type = "bar")
