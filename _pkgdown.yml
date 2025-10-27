@@ -15,8 +15,10 @@ reference:
   - title: "Visualization"
     desc: "Plot DOE summaries across trajectories and branches."
     contents:
+      - plot.doe_results
       - plot.single_doe_branched
       - plot.multi_doe_results
       - plot.multi_doe_branched
+      
 
 
