@@ -1,6 +1,6 @@
 # MIT License
 
-Copyright (c) 2025 Iris Li
+Copyright (c) 2025 Li Tsz Ying (Iris)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

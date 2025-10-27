@@ -1,5 +1,5 @@
 # =========================
-# Branched DOE (rewritten)
+# Branched DOE
 # =========================
 
 # ---------- Utilities ----------
@@ -23,7 +23,7 @@
   pull_row <- function(res, branch = NA_character_) {
     data.frame(
       trajectory   = traj_name,
-      branch       = branch,
+      branch_data       = branch,
       D_naive      = res$D$D_naive %||% NA_real_,
       D_term       = res$D$D_term  %||% NA_real_,
       O            = res$O$O       %||% NA_real_,
@@ -437,6 +437,114 @@ compute_multi_DOE_branched <- function(expr_or_seurat,
 }
 
 # ---------- Plot ----------
+#' Plot DOE metrics for a single branched trajectory
+#'
+#' @description
+#' Visualize results from [compute_single_DOE_branched()] across branches
+#' within one trajectory. Supports bar, heatmap, and radar visualizations.
+#'
+#' @param single_doe_branched A result list from [compute_single_DOE_branched()].
+#' @param metrics Character vector of metric names to include.
+#'   Defaults to c("D_naive","D_term","O","E_naive","E_term","DOE_score").
+#' @param type Plot type: `"bar"`, `"heatmap"`, or `"radar"`.
+#'
+#' @return For `"bar"` and `"heatmap"`, a `ggplot` object.
+#'   For `"radar"`, draws a base R radar plot and returns `NULL` invisibly.
+#' @export
+plot.single_doe_branched <- function(single_doe_branched,
+                                     metrics = c("D_naive","D_term","O",
+                                                 "E_naive","E_term","DOE_score"),
+                                     type = c("bar","heatmap","radar")) {
+
+  type <- match.arg(type)
+  if (!requireNamespace("ggplot2", quietly = TRUE))
+    stop("ggplot2 is required. Please install it.")
+
+  # Optional dependencies
+  if (type %in% c("bar","heatmap") && !requireNamespace("reshape2", quietly = TRUE))
+    stop("reshape2 required (install.packages('reshape2'))")
+  if (type == "radar" && !requireNamespace("fmsb", quietly = TRUE))
+    stop("fmsb required (install.packages('fmsb'))")
+  if (type == "radar" && !requireNamespace("scales", quietly = TRUE))
+    stop("scales required (install.packages('scales'))")
+
+  `%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
+  num1 <- function(x) {
+    if (is.null(x)) return(NA_real_)
+    if (is.list(x)) x <- unlist(x, use.names = FALSE)
+    x <- suppressWarnings(as.numeric(x))
+    x <- x[is.finite(x)]
+    if (length(x)) x[1] else NA_real_
+  }
+
+  branches <- names(single_doe_branched$branches)
+  if (is.null(branches) || !length(branches))
+    stop("No branches found in object.")
+
+  rows <- lapply(branches, function(br) {
+    br_obj <- single_doe_branched$branches[[br]]
+    vals <- setNames(numeric(length(metrics)), metrics)
+    vals["D_naive"] <- num1(br_obj$D$D_naive)
+    vals["D_term"]  <- num1(br_obj$D$D_term)
+    vals["O"]       <- num1(br_obj$O$O)
+    vals["E_naive"] <- num1(br_obj$E$E_naive)
+    vals["E_term"]  <- num1(br_obj$E$E_term)
+    vals["DOE_score"] <- num1(br_obj$DOE_score)
+    data.frame(branch = br, as.list(vals), check.names = FALSE, stringsAsFactors = FALSE)
+  })
+  df <- do.call(rbind, rows)
+  metrics <- intersect(metrics, names(df))
+
+  if (type == "bar") {
+    long <- reshape2::melt(df, id.vars = "branch", variable.name = "metric", value.name = "score")
+    p <- ggplot2::ggplot(long, ggplot2::aes(x = branch, y = score, fill = metric)) +
+      ggplot2::geom_col(position = "dodge", na.rm = TRUE) +
+      ggplot2::theme_minimal() +
+      ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
+      ggplot2::labs(title = "DOE Metrics per Branch", x = "Branch", y = "Score") +
+      ggplot2::coord_cartesian(ylim = c(0, 1))
+    return(p)
+  }
+
+  if (type == "heatmap") {
+    long <- reshape2::melt(df, id.vars = "branch", variable.name = "metric", value.name = "score")
+    p <- ggplot2::ggplot(long, ggplot2::aes(x = metric, y = branch, fill = score)) +
+      ggplot2::geom_tile(color = "white", size = 0.5) +
+      ggplot2::scale_fill_gradient2(low = "red", mid = "yellow", high = "green",
+                                    midpoint = 0.5, name = "Score", na.value = "grey90") +
+      ggplot2::theme_minimal() +
+      ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
+                     plot.title = ggplot2::element_text(hjust = 0.5)) +
+      ggplot2::labs(title = "DOE Metrics Heatmap (Branches)", x = "Metric", y = "Branch") +
+      ggplot2::geom_text(ggplot2::aes(label = ifelse(is.na(score), "NA", sprintf("%.2f", score))),
+                         color = "black", size = 3)
+    return(p)
+  }
+
+  if (type == "radar") {
+    mat <- df[, metrics, drop = FALSE]
+    mat[is.na(mat)] <- 0
+    for (m in metrics) mat[[m]] <- pmax(0, pmin(1, mat[[m]]))
+    rad <- rbind(rep(1, length(metrics)), rep(0, length(metrics)), mat)
+    rownames(rad) <- c("Max","Min", df$branch)
+    n <- nrow(df)
+    fmsb::radarchart(rad, axistype = 1,
+                     pcol = seq_len(n),
+                     pfcol = scales::alpha(seq_len(n), 0.25),
+                     plwd = 2, plty = 1,
+                     cglcol = "grey", cglty = 1, axislabcol = "grey",
+                     caxislabels = rep("",5), cglwd = 0.5, vlcex = 0,
+                     title = "DOE Metrics Radar (Single Branched Trajectory)")
+    graphics::legend("topright", legend = df$branch,
+                     col = seq_len(n), lty = 1, lwd = 2, bty = "n", cex = 0.8)
+    return(invisible(NULL))
+  }
+
+  stop("Unknown type.")
+}
+
+
+
 #' Plot DOE metrics for multi-trajectory branched analysis
 #'
 #' This function visualizes the results from
@@ -477,7 +585,7 @@ compute_multi_DOE_branched <- function(expr_or_seurat,
 #'   numeric values or nested lists/doubles inside each branch object; the
 #'   function extracts the first valid numeric value.
 #'
-#' @examples
+#' @examples NULL
 #' @export
 plot.multi_doe_branched <- function(multi_doe_branched,
                                              scope = c("branch","overall"),
@@ -696,4 +804,6 @@ plot.multi_doe_branched <- function(multi_doe_branched,
 
   stop("Unknown configuration.")
 }
+
+
 

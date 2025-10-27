@@ -63,3 +63,6 @@ numeric values or nested lists/doubles inside each branch object; the
 function extracts the first valid numeric value.
 }
 }
+\examples{
+NULL
+}

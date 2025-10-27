@@ -1,0 +1,167 @@
+---
+title: "Evaluating Branched Pseudotime Trajectories with BioTrajX"
+output:
+  rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Evaluating Branched Pseudotime Trajectories with BioTrajX}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+```{r}
+# Load required packages
+library(BioTrajX)
+library(Seurat)
+```
+
+## 1. Load Stem Cell dataset
+
+Download the dataset manually from the following link:
+
+**https://transfer.it/t/6TjpTRshQZDT**
+
+Then load it into R:
+
+```{r}
+stem_cell <- readRDS("path/to/downloaded_file.rds")
+```
+
+---
+
+## 2. Visualize pseudotime and phenotype annotations
+
+```{r}
+DimPlot(stem_cell, group.by = "Phenotype")
+FeaturePlot(stem_cell, features = "monocle3_pseudotime")
+FeaturePlot(stem_cell, features = "slingshot_pt_single")
+FeaturePlot(stem_cell, features = "CytoTRACE")
+```
+
+---
+
+## 3. Define lineage-specific marker sets
+
+```{r}
+expr <- as.matrix(GetAssayData(stem_cell, layer = "data"))
+
+# Stem and progenitor markers
+stem_progenitor_genes <- c(
+  "Cd34", "Kit", "Flt3", "Prom1", "Thy1",
+  "Hoxb4", "Gata2", "Runx1", "Tal1", "Mecom"
+)
+
+# Erythrocyte / erythroid markers
+erythrocyte_genes <- c(
+  "Gypa", "Hbb-bs", "Hbb-bt", "Hba-a1", "Hba-a2",
+  "Tfrc", "Klf1", "Alas2", "Epor", "Gata1"
+)
+
+
+```
+
+---
+
+## 4. Defining branched trajectories
+Selecting erythrocyte and B-cell lineages:
+
+```{r}
+branches <- c("Stem_to_Ery", "Stem_to_B")
+
+naive_markers_list <- list(
+  Stem_to_Ery = stem_progenitor_genes,
+  Stem_to_B   = stem_progenitor_genes
+)
+
+terminal_markers_list <- list(
+  Stem_to_Ery = erythrocyte_genes,
+  Stem_to_B = c("Cd19", "Cd79a", "Cd79b", "Ms4a1", "Cd22",
+                "Cr2", "Fcer2a", "Pax5", "Ebf1", "Irf4")
+)
+
+branch_filters <- list(
+  Stem_to_Ery = list(include = c("Stem_Progenitors", "Megakaryocyte_progenitors",
+                                 "Erythroid_progenitors_Erythroblasts", "Erythrocytes"),
+                     min_cells = 50),
+  Stem_to_B   = list(include = c("Stem_Progenitors", "Immature_B", "Mature_B"),
+                     min_cells = 50)
+)
+```
+
+
+
+
+---
+## 5. Compute branched DOE with single pseudotime 
+
+```{r}
+res_single_br <- compute_single_DOE_branched(
+  expr_or_seurat = stem_cell,
+  pseudotime = pseudotime_methods$monocle3,
+  naive_markers_list = naive_markers_list,
+  terminal_markers_list = terminal_markers_list,
+  cluster_labels = "Phenotype",
+  branch_filters = branch_filters,
+  verbose = TRUE
+)
+
+plot.single_doe_branched(res_single_br, type = "bar")
+```
+
+
+```{r}
+plot.single_doe_branched(res_single_br, type = "radar")
+```
+```{r}
+plot.single_doe_branched(res_single_br, type = "radar")
+```
+
+
+
+---
+
+## 6. Compute branched DOE with multiple pseudotimes 
+
+```{r}
+res_multi <- compute_multi_DOE_branched(
+  expr_or_seurat = stem_cell,
+  pseudotime_list = pseudotime_methods,
+  naive_markers_list = naive_markers_list,
+  terminal_markers_list = terminal_markers_list,
+  cluster_labels = "Phenotype",
+  branch_filters = branch_filters,
+  verbose = TRUE
+)
+```
+
+
+## 7. Plot branched DOE results
+
+```{r}
+# Per-branch DOE (faceted bar plot)
+plot.multi_doe_branched(res_multi, scope = "branch",
+                        metrics = c("D_naive", "D_term", "O", "E_naive", "E_term", "DOE_score"),
+                        type = "bar", branch_mode = "facet")
+
+# Heatmap per branch
+plot.multi_doe_branched(res_multi, scope = "branch",
+                        type = "heatmap", branch_mode = "stack")
+
+# Radar plot per branch
+plot.multi_doe_branched(res_multi, scope = "branch",
+                        type = "radar", branch_mode = "separate")
+```
+
+
+------------------------------------------------------------------------
+
+
+

@@ -17,12 +17,13 @@ using biologically grounded expectations. It implements the DOE metrics
 (Directionality, Order Consistency, Endpoint Validity) and
 includes plotting utilities for visualization.
 }
-\section{Main Functions}{
+\section{\subsection{Main Functions}{
+}{
 \itemize{
-\item \code{compute_single_DOE_linear()} – score a single linear trajectory.
-\item \code{compute_multi_DOE_linear()} – compare multiple linear trajectories.
-\item \code{compute_single_DOE_branched()} – score a branched trajectory.
-\item \code{compute_multi_DOE_branched()} – compare branched trajectories.
+\item 
+\item 
+\item 
+}
 }
 }
 

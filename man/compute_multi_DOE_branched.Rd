@@ -18,53 +18,49 @@ compute_multi_DOE_branched(
   verbose = TRUE,
   parallel = FALSE,
   n_cores = NULL,
-  tol = 1e-8
+  tol = 1e-08
 )
 }
 \arguments{
-\item{expr_or_seurat}{Shared expression matrix (genes × cells), \code{dgCMatrix},
-or Seurat object.}
+\item{expr_or_seurat}{Expression matrix or Seurat object shared across
+trajectories.}
 
-\item{pseudotime_list}{Named list mapping trajectory identifiers to pseudotime
-vectors (one per trajectory).}
+\item{pseudotime_list}{Named list of pseudotime vectors (one per trajectory).}
 
-\item{naive_markers_list}{Named list of naïve/early markers per branch.}
+\item{naive_markers_list}{Named list of naïve-state markers per branch.}
 
-\item{terminal_markers_list}{Named list of terminal/late markers per branch.}
+\item{terminal_markers_list}{Named list of terminal-state markers per branch.}
 
-\item{cluster_labels}{Optional per-cell cluster labels (vector or Seurat
-metadata column name).}
+\item{cluster_labels}{Optional per-cell cluster/branch labels or metadata
+column name (for Seurat inputs).}
 
-\item{branch_filters}{Optional named list of branch-specific subsetting rules
-passed to \code{compute_single_DOE_branched()}.}
+\item{branch_filters}{Optional named list of branch-specific subsetting
+rules (each element can contain \code{include}, \code{exclude}, \code{min_cells},
+\code{drop_unused_levels}).}
 
-\item{E_method}{Endpoint validity mode; one of \code{"gmm"}, \code{"clusters"}, or
-\code{"combined"}.}
+\item{E_method}{Endpoint scoring approach; one of \code{"gmm"}, \code{"clusters"},
+or \code{"combined"}.}
 
-\item{assay, slot}{Assay slot controls when \code{expr_or_seurat} is a Seurat
-object.}
+\item{assay}{Assay to use when \code{expr_or_seurat} is a Seurat object.}
 
-\item{plot_E}{Logical; allow \code{metrics_E()} to produce diagnostic plots.}
+\item{slot}{Assay slot to use when \code{expr_or_seurat} is a Seurat object.}
 
-\item{verbose}{Logical; emit progress messages.}
+\item{plot_E}{Logical; pass through to \code{metrics_E()} plotting helpers.}
 
-\item{parallel}{Logical; evaluate trajectories in parallel when supported.}
+\item{verbose}{Logical; print progress messages.}
 
-\item{n_cores}{Number of workers used when \code{parallel = TRUE}.}
+\item{parallel}{Logical; evaluate trajectories in parallel when possible.}
+
+\item{n_cores}{Number of workers to use for parallel evaluation.}
 
 \item{tol}{Numerical tolerance forwarded to \code{compute_single_DOE_branched()}.}
 }
 \value{
-A list with class \code{"multi_doe_branched"} containing:
-\itemize{
-\item \code{results}: per-trajectory outputs from \code{compute_single_DOE_branched()}.
-\item \code{comparison_overall}: table of aggregate DOE scores.
-\item \code{comparison_by_branch}: per-branch summary table.
-\item \code{branch_comparisons}: list of branch-level rankings.
-\item \code{best_overall}, \code{best_by_branch}: best-performing trajectories.
-}
+A list with class \code{"multi_doe_branched"} containing per-trajectory
+results, overall/branch comparisons, and metadata about the run.
 }
 \description{
-Wrapper that runs \code{compute_single_DOE_branched()} on multiple trajectories
-and collates the results for downstream ranking and visualization.
+Run \code{compute_single_DOE_branched()} over a set of pseudotime trajectories
+that share an expression object. The function collates branch-level results
+and generates summary tables for downstream plotting and ranking.
 }

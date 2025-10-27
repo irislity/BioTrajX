@@ -1,0 +1,104 @@
+---
+title: "Evaluating Pseudotime Methods with BioTrajX (For Linear Datasets)"
+output:
+  rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Evaluating Pseudotime Methods with BioTrajX}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+```{r}
+# Load required packages
+library(BioTrajX)
+library(Seurat)
+```
+
+## 1. Load the CD8⁺ T cell dataset
+
+Download the Seurat object manually from the following link:
+
+**https://transfer.it/t/PFoL2d0hBZAT*
+
+Then load it into your R session:
+
+```{r}
+cd8t <- readRDS("path/to/downloaded_cd8t_file.rds")
+
+DimPlot(cd8t, group.by = "functional.cluster")
+FeaturePlot(cd8t, features="monocle3_pseudotime")
+FeaturePlot(cd8t, features="slingshot_pseudotime")
+FeaturePlot(cd8t, features="cytotrace_score")
+```
+
+## 2. Prepare expression and metadata
+
+```{r}
+expr <- as.matrix(GetAssayData(cd8t, layer = "data"))
+
+naive <- c("CCR7", "TCF7", "IL7R")
+term  <- c("PDCD1", "LAG3", "HAVCR2", "TOX", "TIGIT", "CTLA4", "CXCL13", "ENTPD1", "ITGAE")
+cluster <- cd8t$functional.cluster
+```
+
+## 3. Evaluate a single pseudotime trajectory
+
+```{r}
+res_single <- compute_single_DOE_linear(
+  cd8t,
+  cd8t$slingshot_pseudotime,
+  naive_markers = naive,
+  terminal_markers = term
+)
+```
+## 4. Visualize DOE results
+```{r}
+plot.doe_results(res_single, type = "bar")
+plot.doe_results(res_single, type = "radar")
+plot.doe_results(res_single, type = "heatmap")
+```
+
+
+
+
+## 5. Evaluate multiple pseudotime methods simultaneously
+
+```{r}
+pseudotime_methods <- list(
+  "monocle3"  = cd8t$monocle3_pseudotime,
+  "slingshot" = cd8t$slingshot_pseudotime,
+  "CytoTRACE" = cd8t$cytotrace_score
+)
+
+res <- compute_multi_DOE_linear(
+  expr,
+  pseudotime_list = pseudotime_methods,
+  naive_markers   = naive,
+  terminal_markers = term
+)
+```
+
+## 6. Visualize DOE results for multiple pseudotimes
+
+```{r}
+plot.multi_doe_results(res, type = "bar")
+```
+
+```{r}
+plot.multi_doe_results(res, type = "radar")
+```
+
+```{r}
+plot.multi_doe_results(res, type = "heatmap")
+```
+
+------------------------------------------------------------------------

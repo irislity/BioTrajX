@@ -16,44 +16,46 @@ compute_single_DOE_branched(
   slot = "data",
   plot_E = FALSE,
   verbose = TRUE,
-  tol = 1e-8
+  tol = 1e-08
 )
 }
 \arguments{
 \item{expr_or_seurat}{Expression matrix (genes × cells) or Seurat object.}
 
-\item{pseudotime}{Numeric pseudotime vector aligned to the columns of
-\code{expr_or_seurat}.}
+\item{pseudotime}{Numeric vector of pseudotime values (named by cell).}
 
-\item{naive_markers_list}{Named list of naïve markers, one character vector per
-branch.}
+\item{naive_markers_list}{Named list of naïve-state markers per branch.}
 
-\item{terminal_markers_list}{Named list of terminal markers, one character
-vector per branch.}
+\item{terminal_markers_list}{Named list of terminal-state markers per branch.}
 
-\item{cluster_labels}{Optional per-cell cluster labels (vector or Seurat
-metadata column name).}
+\item{cluster_labels}{Optional per-cell cluster/branch labels or metadata
+column name (for Seurat inputs).}
 
-\item{branch_filters}{Optional list defining branch-specific subsetting rules
-(include/exclude/minimum cells).}
+\item{branch_filters}{Optional named list of branch-specific subsetting
+rules (each element can contain \code{include}, \code{exclude}, \code{min_cells},
+\code{drop_unused_levels}).}
 
-\item{E_method}{Endpoint validity strategy; \code{"gmm"}, \code{"clusters"}, or
-\code{"combined"}.}
+\item{E_method}{Endpoint scoring approach; one of \code{"gmm"}, \code{"clusters"},
+or \code{"combined"}.}
 
-\item{assay, slot}{Assay retrieval settings when \code{expr_or_seurat} is a
-Seurat object.}
+\item{assay}{Assay to use when \code{expr_or_seurat} is a Seurat object.}
 
-\item{plot_E}{Logical; produce diagnostic plots from \code{metrics_E()}.}
+\item{slot}{Assay slot to use when \code{expr_or_seurat} is a Seurat object.}
 
-\item{verbose}{Logical; print informative messages.}
+\item{plot_E}{Logical; pass through to \code{metrics_E()} plotting helpers.}
+
+\item{verbose}{Logical; print progress messages.}
 
 \item{tol}{Numerical tolerance forwarded to \code{metrics_O()} when supported.}
 }
 \value{
-List containing branch-level results with component metrics, DOE scores, and
-aggregate statistics.
+A list containing branch-level DOE results, aggregated scores, and
+metadata. Each branch entry includes component metrics and a scalar
+\code{DOE_score}.
 }
 \description{
-Evaluate DOE metrics for a branched pseudotime trajectory by iterating through
-branch-specific marker sets and optional filters.
+Evaluate Directionality, Order, and Endpoint (DOE) metrics for a single
+pseudotime trajectory that contains multiple branches. Marker sets are
+provided per branch and the function optionally subsets cells before
+computing the component metrics.
 }

@@ -65,15 +65,6 @@ metrics fail and are caught (default \code{FALSE}).}
 
 \item{drop_unused_levels}{Logical; if \code{TRUE}, drop unused factor levels in
 the subsetted cluster labels (default \code{TRUE}).}
-
-\item{branch_include, branch_exclude}{Optional character vectors defining
-cells to retain or drop prior to scoring (useful for branched trajectories).}
-
-\item{branch_min_cells}{Minimum number of cells required after branch
-filtering.}
-
-\item{tol}{Numeric tolerance forwarded to \code{metrics_O()} when that
-function supports a \code{tol} argument (default \code{1e-8}).}
 }
 \value{
 An object of class \code{"doe_results"}, a list with elements:
@@ -100,11 +91,11 @@ The wrapper:
 \item Aligns \code{pseudotime} (and \code{cluster_labels} when provided) to the
 current cell order.
 \item Optionally subsets to a specified branch for \code{"branched"} trajectories.
-\item Computes D via \code{metrics_D()}, O via \code{metrics_O()} (passing \code{tol}
-when supported), and E via \code{metrics_E()} (controlled by \code{E_method}, \code{plot_E}, and
+\item Computes D via \code{metrics_D()}, O via \code{metrics_O()},
+and E via \code{metrics_E()} (controlled by \code{E_method}, \code{plot_E}, and
 optional cluster specification).
 \item Aggregates a scalar \code{DOE_score} as the mean of available component
-      scores (ignoring \code{NA}s).
+scores (ignoring \code{NA}s).
 }
 
 Component failures are caught; the corresponding entry is set to \code{NA} and the
@@ -127,7 +118,8 @@ res <- compute_single_DOE_linear(
   pseudotime       = pt,
   naive_markers    = naive,
   terminal_markers = term,
-  E_method         = "gmm"
+  E_method         = "gmm",
+  species          = "Homo sapiens"
 )
 str(res)
 

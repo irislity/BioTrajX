@@ -712,3 +712,105 @@ plot.multi_doe_results <- function(multi_doe_results,
     stop("Plot type must be one of: 'bar', 'radar', or 'heatmap'")
   }
 }
+
+#' Plot DOE metrics for a single linear trajectory
+#'
+#' Visualize the Directionality (D), Order (O), and Endpoint (E)
+#' component metrics — along with the combined DOE score —
+#' from a single trajectory analysis.
+#'
+#' @param doe_results A result object returned by
+#'   [compute_single_DOE_linear()], typically containing elements
+#'   `$D`, `$O`, `$E`, and `$DOE_score`.
+#' @param type Character string indicating plot type:
+#'   one of `"bar"`, `"radar"`, or `"heatmap"`.
+#'
+#' @return
+#' - For `"bar"` or `"heatmap"`: a \pkg{ggplot2} object.
+#' - For `"radar"`: draws the plot and invisibly returns `NULL`.
+#'
+#' @details
+#' This function summarizes all DOE components into an easy-to-read visual.
+#' Each metric is normalized between 0 and 1 where applicable.
+#' Missing (`NA`) values are handled gracefully.
+#'
+#' @examples
+#' \dontrun{
+#' res <- compute_single_DOE_linear(expr, pt, naive, term)
+#' plot(res, type = "bar")
+#' plot(res, type = "radar")
+#' plot(res, type = "heatmap")
+#' }
+#'
+#' @method plot doe_results
+#' @export
+plot.doe_results <- function(doe_results, type = c("bar","radar","heatmap")) {
+  type <- match.arg(type)
+
+  if (!requireNamespace("ggplot2", quietly = TRUE))
+    stop("ggplot2 required for plotting")
+
+  metrics <- data.frame(
+    metric = c("D_naive","D_term","O","E_naive","E_term","DOE_score"),
+    value = c(
+      doe_results$D$D_naive %||% NA_real_,
+      doe_results$D$D_term  %||% NA_real_,
+      doe_results$O$O       %||% NA_real_,
+      doe_results$E$E_naive %||% NA_real_,
+      doe_results$E$E_term  %||% NA_real_,
+      doe_results$DOE_score %||% NA_real_
+    )
+  )
+
+  if (type == "bar") {
+    p <- ggplot2::ggplot(metrics, ggplot2::aes(x = metric, y = value, fill = metric)) +
+      ggplot2::geom_col() +
+      ggplot2::theme_minimal() +
+      ggplot2::coord_cartesian(ylim = c(0,1)) +
+      ggplot2::labs(title = "Single Trajectory DOE Metrics",
+                    x = "Metric", y = "Score") +
+      ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+    return(p)
+  }
+
+  if (type == "heatmap") {
+    if (!requireNamespace("reshape2", quietly = TRUE))
+      stop("reshape2 required for heatmap")
+    metrics$value <- pmax(0, pmin(1, metrics$value))
+    p <- ggplot2::ggplot(metrics, ggplot2::aes(x = 1, y = metric, fill = value)) +
+      ggplot2::geom_tile(color = "white", size = 0.5) +
+      ggplot2::scale_fill_gradient2(low = "red", mid = "yellow", high = "green",
+                                    midpoint = 0.5, name = "Score", na.value = "grey90") +
+      ggplot2::theme_minimal() +
+      ggplot2::theme(axis.text.x = ggplot2::element_blank(),
+                     axis.ticks.x = ggplot2::element_blank(),
+                     plot.title = ggplot2::element_text(hjust = 0.5)) +
+      ggplot2::labs(title = "Single Trajectory DOE Heatmap", x = NULL, y = "Metric") +
+      ggplot2::geom_text(ggplot2::aes(label = ifelse(is.na(value), "NA", sprintf("%.2f", value))),
+                         color = "black", size = 3)
+    return(p)
+  }
+
+  if (type == "radar") {
+    if (!requireNamespace("fmsb", quietly = TRUE))
+      stop("fmsb required for radar plots: install.packages('fmsb')")
+    if (!requireNamespace("scales", quietly = TRUE))
+      stop("scales required for radar plots")
+
+    radar_data <- as.data.frame(t(metrics$value))
+    colnames(radar_data) <- metrics$metric
+    radar_data[is.na(radar_data)] <- 0
+    radar_data <- rbind(rep(1, ncol(radar_data)), rep(0, ncol(radar_data)), radar_data)
+    rownames(radar_data) <- c("Max","Min","Trajectory")
+
+    fmsb::radarchart(radar_data, axistype = 1,
+                     pcol = "blue", pfcol = scales::alpha("skyblue", 0.4),
+                     plwd = 2, plty = 1,
+                     cglcol = "grey", cglty = 1, axislabcol = "grey",
+                     cglwd = 0.5, vlcex = 0.8, caxislabels = rep("", 5),
+                     title = "DOE Metrics Radar (Single Trajectory)")
+    invisible(NULL)
+  }
+}
+
+
