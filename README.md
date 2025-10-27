@@ -1,6 +1,6 @@
 # BioTrajX
 
-![](man/figures/icon.jpg)
+<img src="man/figures/icon.jpg" width="200" height="200" />
 
 BioTrajX provides Directionality, Order and Endpoint (DOE) metrics for
 benchmarking single-cell pseudotime trajectories. The package includes wrappers
