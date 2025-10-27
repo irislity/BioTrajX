@@ -2,7 +2,7 @@ Package: BioTrajX
 Type: Package
 Title: Directionality, Order, Endpoint Metrics for Trajectory Analysis
 Version: 0.0.0.9000
-Authors@R: 
+Authors@R: c(
     person("Tsz-Ying (Iris)", "Li",
            email = "irisliarbeit@gmail.com",
            role = c("aut", "cre"),
@@ -14,7 +14,7 @@ Authors@R:
     person("Yao-Ming", "Chang",
            email = "petitming@ibms.sinica.edu.tw",
            role = "ctb",
-           comment = c(ORCID = "0000-0002-6618-862X"))
+           comment = c(ORCID = "0000-0002-6618-862X")))
 Description: BioTrajX implements the DOE (Directionality, Order, Endpoint)
     metrics for benchmarking and comparing single-cell pseudotime trajectories.
     It provides high-level wrappers for linear and branched trajectories,
