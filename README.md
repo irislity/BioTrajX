@@ -38,4 +38,7 @@ plot(branched, scope = "overall", type = "heatmap")
 ![](man/figures/DOE.jpg)
 ![](man/figures/latex.jpg)
 
+## Outputs
+![](man/figures/output.jpg)
+
 
