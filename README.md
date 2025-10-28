@@ -39,6 +39,12 @@ plot(branched, scope = "overall", type = "heatmap")
 ![](man/figures/latex.jpg)
 
 ## Outputs
+```r
+
+plot.multi_doe_branched(results, type = "bar", branch_mode = "facet")
+plot.multi_doe_branched(results, type = "radar", branch_mode = "separate")
+plot.multi_doe_branched(results, type = "heatmap", branch_mode = "stack")
+```
 ![](man/figures/output.jpg)
 
 
