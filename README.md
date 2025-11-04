@@ -44,7 +44,11 @@ plot(branched, scope = "overall", type = "heatmap")
 plot.multi_doe_branched(results, type = "bar", branch_mode = "facet")
 plot.multi_doe_branched(results, type = "radar", branch_mode = "separate")
 plot.multi_doe_branched(results, type = "heatmap", branch_mode = "stack")
+
 ```
 ![](man/figures/output.jpg)
+
+## Updates
+🚧 Beta release and preprint coming December 2025.
 
 
