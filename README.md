@@ -49,6 +49,6 @@ plot.multi_doe_branched(results, type = "heatmap", branch_mode = "stack")
 ![](man/figures/output.jpg)
 
 ## Updates
-🚧 Beta release and preprint coming December 2025.
+🚧 Beta release and accompanying preprint planned for **December 2025**.
 
 
