@@ -13,8 +13,10 @@ jobs:
       - uses: r-lib/actions/setup-pandoc@v2
       - name: Install dependencies
         run: |
-          Rscript -e 'install.packages(c("pkgdown", "remotes"))'
+          Rscript -e 'install.packages("remotes")'
           Rscript -e 'remotes::install_deps(dependencies = TRUE)'
+      - name: Install pkgdown
+        run: Rscript -e 'install.packages("pkgdown", repos="https://cloud.r-project.org")'
       - name: Build site
         run: Rscript -e 'pkgdown::build_site()'
       - name: Deploy to GitHub Pages
