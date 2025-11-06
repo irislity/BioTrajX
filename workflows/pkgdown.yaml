@@ -13,8 +13,7 @@ jobs:
       - uses: r-lib/actions/setup-pandoc@v2
       - name: Install dependencies
         run: |
-          Rscript -e 'install.packages("remotes")'
-          Rscript -e 'remotes::install_cran("pkgdown")'
+          Rscript -e 'install.packages(c("remotes", "pkgdown"), dependencies = TRUE, force = TRUE)'
           Rscript -e 'remotes::install_deps(dependencies = TRUE)'
       - name: Build site
         run: Rscript -e 'pkgdown::build_site()'
@@ -23,3 +22,5 @@ jobs:
         with:
           branch: gh-pages
           folder: docs
+
+
