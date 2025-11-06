@@ -1,6 +1,9 @@
 url: https://irislity.github.io/BioTrajX/
 template:
   bootstrap: 5
+  includes:
+    in_header: |
+      <meta name="google-site-verification" content="c29mVHoF6Au9ZQWbhdDjKnnect-qyxBsLpqYsztdm08" />
 navbar:
   structure:
     left: [reference]
