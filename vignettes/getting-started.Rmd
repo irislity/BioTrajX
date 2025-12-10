@@ -1,0 +1,178 @@
+---
+title: "Getting Started with BioTrajX"
+author: "Li Tsz Ying(Iris)"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with BioTrajX}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+set.seed(123)
+```
+
+## Overview
+
+**BioTrajX** provides quantitative metrics that summarize how well a pseudotime ordering\
+captures expected biological programs. This vignette introduces the three core metrics---\
+**Directionality (D)**, **Order consistency (O)**, and **Endpoints validity (E),** and shows\
+how to compute them on a toy dataset.
+
+Each metric is grounded in a simple statistical definition. Throughout the vignette we\
+assume that we have marker genes associated with an early ("naïve") program and a late\
+("terminal") program, as well as a pseudotime vector that orders cells from early to late\
+states.
+
+## Simulating a small example dataset
+
+To keep the vignette self-contained we simulate a minimal expression matrix with a\
+synthetic pseudotime trajectory. In practice you would replace this with your own data,\
+for example a normalized single-cell RNA-seq expression matrix.
+
+```{r}
+# Construct a toy gene expression matrix (genes x cells)
+G <- 150  # genes
+N <- 200  # cells
+pseudo_true <- seq(0, 1, length.out = N)
+
+# Generate naïve and terminal marker sets
+naive_markers <- paste0("Gene", 1:8)
+terminal_markers <- paste0("Gene", 9:16)
+
+# Create smooth expression trends with noise
+expr <- matrix(rnorm(G * N, sd = 0.4), nrow = G, ncol = N,
+               dimnames = list(paste0("Gene", seq_len(G)), paste0("Cell", seq_len(N))))
+
+for (g in naive_markers) {
+  expr[g, ] <- 2 - 1.5 * pseudo_true + rnorm(N, sd = 0.2)
+}
+for (g in terminal_markers) {
+  expr[g, ] <- 0.5 + 1.8 * pseudo_true + rnorm(N, sd = 0.2)
+}
+
+# Add a little shuffling to mimic an imperfect ordering
+pseudotime <- pseudo_true + rnorm(N, sd = 0.05)
+```
+
+## Directionality (D)
+
+The Directionality score checks that the average expression of each marker program moves\
+in the expected direction along pseudotime. For the naïve program we compute the per-cell\
+score $s^{(\text{naïve})}_i$ as the mean expression of the naïve markers in cell $i$:
+
+$$
+ s^{(\text{naïve})}_i = \frac{1}{|G_{\text{naïve}}|} \sum_{g \in G_{\text{naïve}}} x_{gi},
+$$
+
+where $x_{gi}$ is the expression of gene $g$ in cell $i$. The terminal program score\
+$s^{(\text{term})}_i$ is defined analogously.
+
+We correlate these scores with the pseudotime vector using Spearman's rank correlation\
+$\rho_S$ and rescale the result to the unit interval:
+
+$$
+ D_{\text{naïve}} = \frac{1 + \rho_S(t, s^{(\text{naïve})})}{2}, \qquad
+ D_{\text{term}} = \frac{1 + \rho_S(t, s^{(\text{term})})}{2}.
+$$
+
+Values close to 1 indicate that the marker program changes monotonically in the expected\
+direction (decreasing for naïve, increasing for terminal).
+
+```{r}
+library(BioTrajX)
+D_res <- metrics_D(expr, naive_markers, terminal_markers, pseudotime)
+D_res[c("D_naive", "D_term")]
+```
+
+## Order consistency (O)
+
+The Order consistency metric examines each marker gene individually. For every marker we\
+first assign an expected direction $\delta_g \in \{-1, +1\}$ indicating whether it should\
+decrease (naïve markers) or increase (terminal markers). We then reorder cells by\
+pseudotime and fit an isotonic regression $\hat{f}_g(t)$ that is constrained to be\
+monotonic in the expected direction. The gene-specific score is the oriented coefficient\
+of determination:
+
+$$
+ R_g^2 = 1 - \frac{\sum_i (x_{gi} - \hat{f}_g(t_i))^2}{\sum_i (x_{gi} - \bar{x}_g)^2},
+$$
+
+with $x_{gi}$ flipped in sign whenever $\delta_g = -1$. The overall Order score is the\
+mean across all usable markers:
+
+$$
+ O = \frac{1}{|G_*|} \sum_{g \in G_*} R_g^2,
+$$
+
+where $G_*$ is the subset of markers that pass the interquartile range filter applied by\
+`metrics_O()`.
+
+```{r}
+O_res <- metrics_O(expr, naive_markers, terminal_markers, pseudotime)
+O_res$O
+```
+
+The function also reports per-gene scores `O_f` and the chosen orientation. These details\
+help diagnose which markers support---or contradict---the inferred trajectory.
+
+## Endpoints validity (E)
+
+Endpoints validity focuses on whether the earliest cells resemble naïve endpoints and the\
+latest cells resemble terminal endpoints. Depending on the available annotations the\
+metric can use (i) two-component Gaussian mixture models on program scores,\
+(ii) cluster labels, or (iii) a combination of both. Regardless of how the binary labels\
+are obtained, the scoring step relies on precision-at-$k$ statistics.
+
+Let $y_i^{(\text{naïve})} \in \{0, 1\}$ indicate whether cell $i$ is labeled as naïve and\
+let $k_{\text{naïve}} = \sum_i y_i^{(\text{naïve})}$. Ordering cells from earliest to latest\
+pseudotime (denoted by parentheses), the naïve precision-at-$k$ score is
+
+$$
+ E_{\text{naïve}} = \frac{1}{k_{\text{naïve}}} \sum_{i = 1}^{k_{\text{naïve}}}
+   y_{(i)}^{(\text{naïve})}.
+$$
+
+For terminal labels we sort in the opposite direction and compute
+
+$$
+ E_{\text{term}} = \frac{1}{k_{\text{term}}} \sum_{i = 1}^{k_{\text{term})}}
+   y_{(i)}^{(\text{term})},
+$$
+
+where $k_{\text{term}} = \sum_i y_i^{(\text{term})}$. To interpret these quantities we\
+normalize them by the prevalence $p = k / n$ that would be achieved under a random\
+ordering: $\tilde{E} = E / p$. When both normalized scores are available the function\
+returns their harmonic mean as a composite summary $E_{\text{comp}}$.
+
+Here we demonstrate the cluster-based workflow. We coarsely label the first and last 20%\
+of cells as naïve or terminal clusters, then compute the metric.
+
+```{r}
+cluster_labels <- cut(pseudotime, breaks = quantile(pseudotime, probs = seq(0, 1, length.out = 6)),
+                      include.lowest = TRUE, labels = paste0("C", 1:5))
+naive_clusters <- c("C1", "C2")
+terminal_clusters <- c("C4", "C5")
+
+E_res <- metrics_E(
+  pseudotime = pseudotime,
+  cluster_labels = cluster_labels,
+  naive_clusters = naive_clusters,
+  terminal_clusters = terminal_clusters,
+  method = "clusters",
+  plot = FALSE
+)
+
+E_res$summary[c("E_naive", "E_term", "E_comp")]
+```
+
+## Next steps
+
+This vignette only scratches the surface. Real analyses typically incorporate\
+trajectory-fitting methods, marker discovery, and visualization. Refer to the package\
+reference for detailed argument descriptions and plotting helpers such as\
+`plot_metrics_D()` and `plot_metrics_O()` when applying the metrics to your own data.
