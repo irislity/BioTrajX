@@ -1,16 +1,6 @@
-name: pkgdown
-
-on:
-  push:
-    branches: [main]
-
-permissions:
-  contents: write
-
 jobs:
   pkgdown:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v3
 
@@ -22,12 +12,14 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: pkgdown
+          extra-packages: |
+            any::pkgdown
+            local::.
           needs: website
 
       - name: Build site
         run: Rscript -e 'pkgdown::build_site()'
-
+        
       - name: Deploy site
         uses: JamesIves/github-pages-deploy-action@v4
         with:
