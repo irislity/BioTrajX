@@ -8,15 +8,6 @@ template:
 navbar:
   structure:
     left: [reference]
-  components:
-    tutorials:
-      text: Tutorials
-      menu:
-        - text: "Linear Trajectory Tutorial"
-          href: tutorials/Linear_Trajectory.html
-	    menu:
-        - text: "Branched Trajectory Tutorial"
-          href: tutorials/Branched_Trajectory.html
 reference:
   - title: "DOE scoring wrappers"
     desc: "High-level helpers for computing DOE metrics."
