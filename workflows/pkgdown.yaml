@@ -10,16 +10,20 @@ jobs:
         with:
           use-public-rspm: true
 
+      # 1. Standard dependency setup for YOUR package
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: |
-            any::pkgdown
-            local::.
-          needs: website
+          extra-packages: any::rcmdcheck
+          needs: check
 
+      # 2. FORCE install pkgdown manually
+      - name: Install pkgdown
+        run: Rscript -e 'install.packages("pkgdown")'
+
+      # 3. Build as normal
       - name: Build site
         run: Rscript -e 'pkgdown::build_site()'
-        
+
       - name: Deploy site
         uses: JamesIves/github-pages-deploy-action@v4
         with:
