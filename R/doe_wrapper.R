@@ -252,16 +252,24 @@ compute_single_DOE_linear <- function(expr_or_seurat,
   term_scores  <- .per_cell_score(expr, terminal_markers)
 
   # ---- O metric
-  O_res <- tryCatch({
-    if (.has_formal(metrics_O)) {
-      metrics_O(expr, naive_markers, terminal_markers, pseudotime)
-    } else {
-      metrics_O(expr, naive_markers, terminal_markers, pseudotime)
+  O_res <- tryCatch(
+    metrics_O(
+      expr = expr,
+      naive_markers = naive_markers,
+      terminal_markers = terminal_markers,
+      pseudotime = pseudotime
+    ),
+    error = function(e) {
+      if (verbose) message("O metric failed: ", e$message)
+      list(
+        O = NA_real_,
+        O_f = numeric(0),
+        genes_used = character(0),
+        orientation = NA_character_,
+        error = e$message
+      )
     }
-  }, error = function(e) {
-    if (verbose) message("O metric failed: ", e$message)
-    list(O = NA_real_, error = e$message)
-  })
+  )
   # ---- E metric
   E_res <- tryCatch({
     metrics_E(pseudotime,
