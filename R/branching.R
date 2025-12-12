@@ -187,13 +187,24 @@ compute_single_DOE_branched <- function(expr_or_seurat,
     }, error = function(e) list(D_naive=NA_real_, D_term=NA_real_, error=e$message))
 
     # ---- O ----
-    O_res <- tryCatch({
-      if (.has_formal(metrics_O)) {
-        metrics_O(sub$expr, naive_markers, terminal_markers, sub$pt)
-      } else {
-        metrics_O(sub$expr, naive_markers, terminal_markers, sub$pt)
+    O_res <- tryCatch(
+      metrics_O(
+        expr = sub$expr,
+        naive_markers = naive_markers,
+        terminal_markers = terminal_markers,
+        pseudotime = sub$pt
+      ),
+      error = function(e) {
+        if (verbose) message("O metric failed (branch): ", e$message)
+        list(
+          O = NA_real_,
+          O_f = numeric(0),
+          genes_used = character(0),
+          orientation = NA_character_,
+          error = e$message
+        )
       }
-    }, error = function(e) list(O=NA_real_, error=e$message))
+    )
 
     # ---- E ----
     # robust colMeans: handle empty overlaps to avoid numeric(0)
