@@ -1,0 +1,14 @@
+.Rproj.user
+.Rhistory
+.Rapp.history
+.Rdata
+.httr-oauth
+.DS_Store
+.quarto
+docs
+inst/doc
+renv/
+renv.lock
+output/
+Rplots.pdf
+vignettes/*.html
