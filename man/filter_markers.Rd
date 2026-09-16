@@ -11,7 +11,7 @@ filter_markers(ms, expr, top_n = 30L, min_detection = 0.1)
 \code{get_markers_cellmarker()}, \code{get_markers_go()}, or \code{.marker_set()}.}
 
 \item{expr}{A genes-by-cells expression matrix (dense or sparse), or a
-\link[Seurat:Seurat]{Seurat} object.  Should contain log-normalised counts.}
+\link[Seurat:Seurat-package]{Seurat::Seurat} object.  Should contain log-normalised counts.}
 
 \item{top_n}{Integer.  Maximum number of genes to retain per group after
 dropout filtering.  Genes are ranked by mean non-zero expression and the
@@ -41,7 +41,7 @@ expression means a stronger, more detectable signal per cell.
 
 Both steps are purely expression-based with no pseudotime or cluster
 assumptions, so there is no circularity with downstream DOE scoring.
-Accepts dense matrices, sparse \link[Matrix:dgCMatrix]{Matrix::dgCMatrix} objects, or \link[Seurat:Seurat]{Seurat}
+Accepts dense matrices, sparse \link[Matrix:dgCMatrix]{Matrix::dgCMatrix} objects, or \link[Seurat:Seurat-package]{Seurat::Seurat}
 objects (normalised data layer is extracted automatically).
 }
 \examples{

@@ -56,11 +56,6 @@ Useful links:
 \author{
 \strong{Maintainer}: Tsz-Ying (Iris) Li \email{irisliarbeit@gmail.com} (\href{https://orcid.org/0009-0008-6695-3820}{ORCID})
 
-Authors:
-\itemize{
-  \item Tsz-Ying (Iris) Li \email{irisliarbeit@gmail.com} (\href{https://orcid.org/0009-0008-6695-3820}{ORCID})
-}
-
 Other contributors:
 \itemize{
   \item Shih-Yu Chen \email{sychen@ibms.sinica.edu.tw} (\href{https://orcid.org/0000-0002-7955-481X}{ORCID}) [contributor]

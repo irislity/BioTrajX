@@ -1,3 +1,28 @@
+# ── Null R² lookup table (10,000 simulations per K, seed 2024) ───────────────
+# Expected isotonic R² for K i.i.d. N(0,1) points (non-decreasing fit).
+.O_NULL_R2_TABLE <- c(
+  "5"  = 0.31973,
+  "6"  = 0.28868,
+  "7"  = 0.26882,
+  "8"  = 0.24526,
+  "9"  = 0.22713,
+  "10" = 0.21386,
+  "12" = 0.19330,
+  "15" = 0.16654,
+  "20" = 0.13913,
+  "25" = 0.11822,
+  "30" = 0.10388,
+  "40" = 0.08435,
+  "50" = 0.07109
+)
+
+.O_get_null_r2 <- function(n_bins) {
+  keys <- as.integer(names(.O_NULL_R2_TABLE))
+  vals <- unname(.O_NULL_R2_TABLE)
+  if (n_bins %in% keys) return(vals[match(n_bins, keys)])
+  stats::approx(log(keys), vals, xout = log(n_bins), rule = 2)$y
+}
+
 #' Compute Order consistency (O) via pseudobulk isotonic R² (null-calibrated)
 #'
 #' Cells are binned into \code{n_bins} equal-width pseudotime intervals and
@@ -34,31 +59,6 @@
 #'   \item{null_r2}{the \eqn{R^2_{\text{null}}} value used for rescaling}
 #'   \item{orientation}{"+" or "-"}
 #' @export
-
-# ── Null R² lookup table (10,000 simulations per K, seed 2024) ───────────────
-# Expected isotonic R² for K i.i.d. N(0,1) points (non-decreasing fit).
-.O_NULL_R2_TABLE <- c(
-  "5"  = 0.31973,
-  "6"  = 0.28868,
-  "7"  = 0.26882,
-  "8"  = 0.24526,
-  "9"  = 0.22713,
-  "10" = 0.21386,
-  "12" = 0.19330,
-  "15" = 0.16654,
-  "20" = 0.13913,
-  "25" = 0.11822,
-  "30" = 0.10388,
-  "40" = 0.08435,
-  "50" = 0.07109
-)
-
-.O_get_null_r2 <- function(n_bins) {
-  keys <- as.integer(names(.O_NULL_R2_TABLE))
-  vals <- unname(.O_NULL_R2_TABLE)
-  if (n_bins %in% keys) return(vals[match(n_bins, keys)])
-  stats::approx(log(keys), vals, xout = log(n_bins), rule = 2)$y
-}
 
 metrics_o <- function(expr,
                       early_markers,
