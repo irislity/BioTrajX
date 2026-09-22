@@ -25,7 +25,7 @@ methods using the D, O, and E metrics.
 
 ## Supported trajectory inference methods
 
-BioTrajX evaluates pseudotime from any TI method. The seven methods tested in
+BioTrajX evaluates pseudotime from any TI method. The eight methods tested in
 this package are listed below. You are not required to run all of them — pass
 whichever pseudotime vectors you have to `compute_multi_doe_linear()`.
 
@@ -33,11 +33,12 @@ whichever pseudotime vectors you have to `compute_multi_doe_linear()`.
 |---|---|---|---|
 | Slingshot | MST + principal curves | R | Recommended for linear trajectories |
 | CytoTRACE | Gene count structure | R | No root cell needed |
-| CytoTRACE2 | Deep learning | R | Requires raw counts |
+| Monocle3 | Graph-based learning | R | Requires a root cell |
 | DPT | Diffusion pseudotime | R | Requires a root cell |
 | SCORPIUS | Dimensionality reduction | R | Designed for linear trajectories |
-| PAGA | Graph abstraction + DPT | Python | Requires `scanpy` conda env |
-| CellRank | Fate probabilities | Python | Requires `cellrank` conda env |
+| TSCAN | MST on cluster centers | R | Only assigns pseudotime to cells on the main path |
+| PAGA-DPT | Graph abstraction + DPT | Python | Requires `scanpy` conda env |
+| Palantir | Markov-chain fate probabilities | Python | Requires `palantir` conda env |
 
 To run all methods at once, source `manuscript/scripts/real/run_ti_methods.R`,
 call `run_all_ti_methods()`, and add the results to your Seurat object:
@@ -74,9 +75,9 @@ cd8t <- readRDS("data/cd8t.rds")
 
 ```{r visualize}
 DimPlot(cd8t, group.by = "functional.cluster")
-FeaturePlot(cd8t, features = "monocle3_pseudotime")
-FeaturePlot(cd8t, features = "slingshot_pseudotime")
-FeaturePlot(cd8t, features = "cytotrace_score")
+FeaturePlot(cd8t, features = "Monocle3")
+FeaturePlot(cd8t, features = "Slingshot")
+FeaturePlot(cd8t, features = "CytoTRACE")
 ```
 
 ```{r umap-plots, echo = FALSE, eval = TRUE, out.width = "100%"}
@@ -153,7 +154,7 @@ ms <- get_markers_msigdb(
 # equivalent to passing `early` and `term` by hand
 res_single <- compute_single_doe_linear(
   cd8t,
-  cd8t$slingshot_pseudotime,
+  cd8t$Slingshot,
   early_markers    = ms$early,
   terminal_markers = ms$terminal
 )
@@ -175,7 +176,7 @@ ms <- get_markers_msigdb(
 ```{r single-doe}
 res_single <- compute_single_doe_linear(
   cd8t,
-  cd8t$slingshot_pseudotime,
+  cd8t$Slingshot,
   early_markers    = early,
   terminal_markers = term
 )
@@ -201,12 +202,12 @@ knitr::include_graphics("figures/linear/single_doe_heatmap.pdf")
 pseudotime_methods <- list(
   Slingshot  = cd8t$Slingshot,
   CytoTRACE  = cd8t$CytoTRACE,
-  CytoTRACE2 = cd8t$CytoTRACE2,
   Monocle3   = cd8t$Monocle3,
   DPT        = cd8t$DPT,
   SCORPIUS   = cd8t$SCORPIUS,
-  PAGA       = cd8t$PAGA,
-  CellRank   = cd8t$CellRank
+  TSCAN      = cd8t$TSCAN,
+  `PAGA-DPT` = cd8t$`PAGA-DPT`,
+  Palantir   = cd8t$Palantir
 )
 
 res <- compute_multi_doe_linear(

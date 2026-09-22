@@ -16,20 +16,20 @@ remotes::install_github("irislity/BioTrajX")
 
 ## Getting started
 
-![](man/figures/overview.jpg)
+![](man/figures/overview.jpeg)
 
 ```r
 library(BioTrajX)
 
 # compute DOE metrics for a single trajectory
-result <- compute_single_DOE_linear(expr, pseudotime, early_markers, terminal_markers)
+result <- compute_single_doe_linear(expr, pseudotime, early_markers, terminal_markers)
 
 # compare multiple trajectories
-comparison <- compute_multi_DOE_linear(expr, pseudotime_list, early_markers, terminal_markers)
+comparison <- compute_multi_doe_linear(expr, pseudotime_list, early_markers, terminal_markers)
 plot(comparison, type = "bar")
 
 # branched trajectories
-branched <- compute_multi_DOE_branched(expr, branched_pseudotime, early_markers_list, terminal_markers_list)
+branched <- compute_multi_doe_branched(expr, branched_pseudotime, early_markers_list, terminal_markers_list)
 plot(branched, scope = "overall", type = "heatmap") 
 
 ```
@@ -41,9 +41,9 @@ plot(branched, scope = "overall", type = "heatmap")
 ## Outputs
 ```r
 
-plot.multi_doe_branched(results, type = "bar", branch_mode = "facet")
-plot.multi_doe_branched(results, type = "radar", branch_mode = "separate")
-plot.multi_doe_branched(results, type = "heatmap", branch_mode = "stack")
+plot(branched, type = "bar", branch_mode = "facet")
+plot(branched, type = "radar", branch_mode = "separate")
+plot(branched, type = "heatmap", branch_mode = "stack")
 
 ```
 ![](man/figures/output.jpg)
