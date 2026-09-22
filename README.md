@@ -48,6 +48,18 @@ plot(branched, type = "heatmap", branch_mode = "stack")
 ```
 ![](man/figures/output.jpg)
 
+## Tutorials
 
+- [Evaluating pseudotime methods with BioTrajX (linear datasets)](vignettes/linear-trajectory.md) —
+  walks through a real CD8+ T cell exhaustion dataset, including how to use
+  the DOE score to sanity-check a root cell choice.
+- [Evaluating branched pseudotime trajectories with BioTrajX](vignettes/branched-trajectory.md) —
+  a branched stem cell differentiation dataset, scored per lineage.
+- [Validating BioTrajX against ground truth](vignettes/ground-truth-validation.md) —
+  checks whether the (label-free) DOE score actually predicts recovery of a
+  known ground truth (true day of infection) across methods.
+
+All three are also available as a rendered HTML site at
+[irislity.github.io/BioTrajX](https://irislity.github.io/BioTrajX/articles/).
 
 

@@ -116,10 +116,10 @@ FeaturePlot(stem_cell, features = "CytoTRACE")
 ```
 
 ```{r umap-plots, echo = FALSE, eval = TRUE, out.width = "100%"}
-knitr::include_graphics("figures/branched/umap_phenotype.pdf")
-knitr::include_graphics("figures/branched/umap_slingshot.pdf")
-knitr::include_graphics("figures/branched/umap_monocle3.pdf")
-knitr::include_graphics("figures/branched/umap_cytotrace.pdf")
+knitr::include_graphics("figures/branched/umap_phenotype.png")
+knitr::include_graphics("figures/branched/umap_slingshot.png")
+knitr::include_graphics("figures/branched/umap_monocle3.png")
+knitr::include_graphics("figures/branched/umap_cytotrace.png")
 ```
 
 ## 3. Define lineage-specific marker sets
@@ -257,9 +257,9 @@ plot(res_single_br, type = "heatmap")
 ```
 
 ```{r single-doe-plots, echo = FALSE, eval = TRUE, out.width = "100%"}
-knitr::include_graphics("figures/branched/single_doe_bar.pdf")
-knitr::include_graphics("figures/branched/single_doe_radar.pdf")
-knitr::include_graphics("figures/branched/single_doe_heatmap.pdf")
+knitr::include_graphics("figures/branched/single_doe_bar.png")
+knitr::include_graphics("figures/branched/single_doe_radar.png")
+knitr::include_graphics("figures/branched/single_doe_heatmap.png")
 ```
 
 ## 6. Compute DOE across multiple pseudotime methods
@@ -300,8 +300,131 @@ plot(res_multi, scope = "overall", type = "bar")
 ```
 
 ```{r results-plots, echo = FALSE, eval = TRUE, out.width = "100%"}
-knitr::include_graphics("figures/branched/doe_bar_branch.pdf")
-knitr::include_graphics("figures/branched/doe_radar_branch.pdf")
-knitr::include_graphics("figures/branched/doe_heatmap_branch.pdf")
-knitr::include_graphics("figures/branched/doe_bar_overall.pdf")
+knitr::include_graphics("figures/branched/doe_bar_branch.png")
+knitr::include_graphics("figures/branched/doe_radar_branch.png")
+knitr::include_graphics("figures/branched/doe_heatmap_branch.png")
+knitr::include_graphics("figures/branched/doe_bar_overall.png")
+```
+
+## 8. What do the top methods actually look like?
+
+Ground-truth `Phenotype` next to each method's pseudotime, on the same UMAP —
+the real result from this dataset in the BioTrajX manuscript (Figure S10a):
+
+```{r umap-grid-eval, eval = FALSE}
+DimPlot(stem_cell, group.by = "Phenotype") + ggplot2::labs(title = "Ground truth")
+FeaturePlot(stem_cell, features = "Slingshot") + ggplot2::labs(title = "Slingshot")
+FeaturePlot(stem_cell, features = "Monocle3")  + ggplot2::labs(title = "Monocle3")
+# ... one panel per method
+```
+
+```{r s10-umap-grid, echo = FALSE, eval = TRUE, out.width = "100%"}
+knitr::include_graphics("figures/branched/s10/S10_a_umap.png")
+```
+
+## 9. Per-branch pseudotime, ranked by that branch's own DOE score
+
+A method can do well on one lineage and poorly on the other — `scope =
+"branch"` scoring exists precisely so each branch is judged on its own
+markers and cell subset. Rank each branch's method panels by that branch's
+own `DOE_score` (not the aggregate) so the best-performing method for *that*
+lineage comes first:
+
+```{r branch-umap-order, eval = FALSE}
+ery_order <- res_multi$comparison_by_branch |>
+  subset(branch == "Stem_to_Ery") |>
+  (\(df) df$trajectory[order(-df$DOE_score)])()
+
+# FeaturePlot(subset(stem_cell, Phenotype %in% branch_filters$Stem_to_Ery$include),
+#             features = ery_order) # one panel per method, in DOE order
+```
+
+```{r s10-branch-umap, echo = FALSE, eval = TRUE, out.width = "100%"}
+knitr::include_graphics("figures/branched/s10/S10_c_branch_umap_pseudotime.png")
+```
+
+## 10. Module score trends, one row per branch
+
+Each branch has its own early/terminal modules (stem-progenitor vs.
+erythroid for Stem→Ery, stem-progenitor vs. B cell for Stem→B) and its own
+DOE-based method ordering:
+
+```{r module-trends-branch, eval = FALSE}
+stem_cell <- AddModuleScore(stem_cell, features = list(stem_progenitor_genes), name = "early_mod")
+stem_cell <- AddModuleScore(stem_cell, features = list(erythrocyte_genes),     name = "ery_mod")
+stem_cell <- AddModuleScore(stem_cell, features = list(bcell_genes),           name = "bcell_mod")
+
+plot_branch_trends <- function(branch, terminal_score_col, terminal_label) {
+  order_br <- subset(res_multi$comparison_by_branch, branch == !!branch)
+  order_br <- order_br$trajectory[order(-order_br$DOE_score)]
+  cells    <- colnames(stem_cell)[stem_cell$Phenotype %in% branch_filters[[branch]]$include]
+
+  df <- do.call(rbind, lapply(order_br, function(m) {
+    pt <- pseudotime_methods[[m]][cells]
+    data.frame(Pseudotime = pt,
+               Score  = c(stem_cell$early_mod1[cells], stem_cell[[terminal_score_col]][cells]),
+               Module = rep(c("Early", terminal_label), each = length(pt)),
+               Method = m)
+  }))
+  df$Method <- factor(df$Method, levels = order_br)
+
+  ggplot2::ggplot(df, ggplot2::aes(Pseudotime, Score, colour = Module)) +
+    ggplot2::geom_point(size = 0.2, alpha = 0.12) +
+    ggplot2::geom_smooth(method = "loess", se = TRUE, span = 0.5) +
+    ggplot2::facet_wrap(~ Method, nrow = 1, scales = "free") +
+    ggplot2::theme_minimal()
+}
+
+plot_branch_trends("Stem_to_Ery", "ery_mod1",   "Erythrocyte")
+plot_branch_trends("Stem_to_B",   "bcell_mod1", "B cell")
+```
+
+```{r s10-module-trends, echo = FALSE, eval = TRUE, out.width = "100%"}
+knitr::include_graphics("figures/branched/s10/S10_d_module_trends.png")
+```
+
+## 11. Gene-level trends and cell-type recovery, per branch
+
+The same GAM-fit-gene-vs-pseudotime and violin-by-celltype views from the
+linear vignette apply per branch here. Below is the Stem→Erythroid branch;
+calling the same code with `branch_filters$Stem_to_B` and the B-cell marker
+genes produces the equivalent pair of panels for the Stem→B branch.
+
+```{r gam-violin-branch, eval = FALSE}
+ery_cells <- colnames(stem_cell)[stem_cell$Phenotype %in% branch_filters$Stem_to_Ery$include]
+ery_order <- subset(res_multi$comparison_by_branch, branch == "Stem_to_Ery")
+ery_order <- ery_order$trajectory[order(-ery_order$DOE_score)]
+
+# GAM fits of a few marker genes vs. pseudotime, faceted by method
+gam_df <- do.call(rbind, lapply(ery_order, function(m) {
+  pt <- pseudotime_methods[[m]][ery_cells]
+  do.call(rbind, lapply(c("Cd34", "Alas2", "Gypa"), function(g) {
+    data.frame(Method = m, Gene = g, Pseudotime = pt, Expr = expr[g, ery_cells])
+  }))
+}))
+gam_df$Method <- factor(gam_df$Method, levels = ery_order)
+
+ggplot2::ggplot(gam_df, ggplot2::aes(Pseudotime, Expr)) +
+  ggplot2::geom_point(size = 0.15, alpha = 0.08, colour = "grey50") +
+  ggplot2::geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs")) +
+  ggplot2::facet_grid(Method ~ Gene, scales = "free_y") +
+  ggplot2::theme_minimal()
+
+# Violin of pseudotime by cell type, faceted by method
+violin_df <- do.call(rbind, lapply(ery_order, function(m) {
+  data.frame(Method = m, CellType = stem_cell$Phenotype[ery_cells],
+             Pseudotime = pseudotime_methods[[m]][ery_cells])
+}))
+violin_df$Method <- factor(violin_df$Method, levels = ery_order)
+
+ggplot2::ggplot(violin_df, ggplot2::aes(CellType, Pseudotime)) +
+  ggplot2::geom_violin(ggplot2::aes(fill = CellType), scale = "width") +
+  ggplot2::geom_boxplot(width = 0.15, outlier.size = 0.4) +
+  ggplot2::facet_wrap(~ Method, ncol = 3) +
+  ggplot2::theme_classic()
+```
+
+```{r s10-gam-violin, echo = FALSE, eval = TRUE, out.width = "100%"}
+knitr::include_graphics("figures/branched/s10/S10_e_gam_stem_to_ery.png")
+knitr::include_graphics("figures/branched/s10/S10_f_violin_stem_to_ery.png")
 ```

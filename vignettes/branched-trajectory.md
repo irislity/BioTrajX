@@ -9,7 +9,7 @@ two lineages (Stem → Erythroid and Stem → B cell), BioTrajX requires
 
 ## Supported trajectory inference methods
 
-BioTrajX evaluates pseudotime from any TI method. The seven methods
+BioTrajX evaluates pseudotime from any TI method. The eight methods
 tested in this package are listed below. You are not required to run all
 of them — pass whichever pseudotime vectors you have to
 `compute_multi_doe_branched()`.
@@ -18,11 +18,12 @@ of them — pass whichever pseudotime vectors you have to
 |----|----|----|----|
 | Slingshot | MST + principal curves | R | Recommended; handles branching well |
 | CytoTRACE | Gene count structure | R | No root cell needed |
-| CytoTRACE2 | Deep learning | R | Requires raw counts |
+| Monocle3 | Graph-based learning | R | Requires a root cell |
 | DPT | Diffusion pseudotime | R | Requires a root cell |
 | SCORPIUS | Dimensionality reduction | R | Designed for linear trajectories |
-| PAGA | Graph abstraction + DPT | Python | Requires `scanpy` conda env |
-| CellRank | Fate probabilities | Python | Requires `cellrank` conda env |
+| TSCAN | MST on cluster centers | R | Only assigns pseudotime to cells on the main path |
+| PAGA-DPT | Graph abstraction + DPT | Python | Requires `scanpy` conda env |
+| Palantir | Markov-chain fate probabilities | Python | Requires `palantir` conda env |
 
 To run all methods at once, source
 `manuscript/scripts/real/run_ti_methods.R`, call `run_all_ti_methods()`,
@@ -33,7 +34,7 @@ source("manuscript/scripts/real/run_ti_methods.R")
 
 # Identify a root cell (lowest pseudotime among Stem_Progenitors)
 stem_cells <- which(stem_cell$Phenotype == "Stem_Progenitors")
-start_cell <- names(which.min(stem_cell$slingshot_pt_single[stem_cells]))
+start_cell <- names(which.min(stem_cell$Slingshot[stem_cells]))
 
 expr       <- as.matrix(GetAssayData(stem_cell, layer = "data"))
 ti_results <- run_all_ti_methods(expr, start_cell = start_cell)
@@ -68,21 +69,22 @@ methods and stored the resulting pseudotime vectors as Seurat metadata
 columns. The expected columns (added by `run_all_ti_methods()` +
 `AddMetaData()`) are:
 
-| Column       | Method                   | Language |
-|--------------|--------------------------|----------|
-| `Slingshot`  | MST + principal curves   | R        |
-| `CytoTRACE`  | Gene count structure     | R        |
-| `CytoTRACE2` | Deep learning            | R        |
-| `DPT`        | Diffusion pseudotime     | R        |
-| `SCORPIUS`   | Dimensionality reduction | R        |
-| `PAGA`       | Graph abstraction + DPT  | Python   |
-| `CellRank`   | Fate probabilities       | Python   |
+| Column      | Method                          | Language |
+|-------------|---------------------------------|----------|
+| `Slingshot` | MST + principal curves          | R        |
+| `CytoTRACE` | Gene count structure            | R        |
+| `Monocle3`  | Graph-based learning            | R        |
+| `DPT`       | Diffusion pseudotime            | R        |
+| `SCORPIUS`  | Dimensionality reduction        | R        |
+| `TSCAN`     | MST on cluster centers          | R        |
+| `PAGA-DPT`  | Graph abstraction + DPT         | Python   |
+| `Palantir`  | Markov-chain fate probabilities | Python   |
 
 Verify they are present before continuing:
 
 ``` r
-required_cols <- c("Slingshot", "CytoTRACE", "CytoTRACE2",
-                   "DPT", "SCORPIUS", "PAGA", "CellRank")
+required_cols <- c("Slingshot", "CytoTRACE", "Monocle3",
+                   "DPT", "SCORPIUS", "TSCAN", "PAGA-DPT", "Palantir")
 missing <- setdiff(required_cols, colnames(stem_cell@meta.data))
 if (length(missing) > 0) {
   stop("Missing pseudotime columns: ", paste(missing, collapse = ", "),
@@ -94,18 +96,12 @@ You can visually inspect them alongside cluster annotations:
 
 ``` r
 DimPlot(stem_cell, group.by = "Phenotype")
-FeaturePlot(stem_cell, features = "monocle3_pseudotime")
-FeaturePlot(stem_cell, features = "slingshot_pt_single")
+FeaturePlot(stem_cell, features = "Monocle3")
+FeaturePlot(stem_cell, features = "Slingshot")
 FeaturePlot(stem_cell, features = "CytoTRACE")
 ```
 
-<embed src="figures/branched/umap_phenotype.pdf" width="100%" type="application/pdf" />
-
-<embed src="figures/branched/umap_slingshot.pdf" width="100%" type="application/pdf" />
-
-<embed src="figures/branched/umap_monocle3.pdf" width="100%" type="application/pdf" />
-
-<embed src="figures/branched/umap_cytotrace.pdf" width="100%" type="application/pdf" />
+<img src="figures/branched/umap_phenotype.png" alt="" width="100%" /><img src="figures/branched/umap_slingshot.png" alt="" width="100%" /><img src="figures/branched/umap_monocle3.png" alt="" width="100%" /><img src="figures/branched/umap_cytotrace.png" alt="" width="100%" />
 
 ## 3. Define lineage-specific marker sets
 
@@ -211,11 +207,12 @@ branch_filters <- list(
 pseudotime_methods <- list(
   Slingshot  = stem_cell$Slingshot,
   CytoTRACE  = stem_cell$CytoTRACE,
-  CytoTRACE2 = stem_cell$CytoTRACE2,
+  Monocle3   = stem_cell$Monocle3,
   DPT        = stem_cell$DPT,
   SCORPIUS   = stem_cell$SCORPIUS,
-  PAGA       = stem_cell$PAGA,
-  CellRank   = stem_cell$CellRank
+  TSCAN      = stem_cell$TSCAN,
+  `PAGA-DPT` = stem_cell$`PAGA-DPT`,
+  Palantir   = stem_cell$Palantir
 )
 ```
 
@@ -228,7 +225,7 @@ separately for each branch and returns an aggregated score.
 ``` r
 res_single_br <- compute_single_doe_branched(
   expr_or_seurat        = stem_cell,
-  pseudotime            = pseudotime_methods$monocle3,
+  pseudotime            = pseudotime_methods$Monocle3,
   early_markers_list    = early_markers_list,
   terminal_markers_list = terminal_markers_list,
   cluster_labels        = "Phenotype",
@@ -241,11 +238,7 @@ plot(res_single_br, type = "radar")
 plot(res_single_br, type = "heatmap")
 ```
 
-<embed src="figures/branched/single_doe_bar.pdf" width="100%" type="application/pdf" />
-
-<embed src="figures/branched/single_doe_radar.pdf" width="100%" type="application/pdf" />
-
-<embed src="figures/branched/single_doe_heatmap.pdf" width="100%" type="application/pdf" />
+<img src="figures/branched/single_doe_bar.png" alt="" width="100%" /><img src="figures/branched/single_doe_radar.png" alt="" width="100%" /><img src="figures/branched/single_doe_heatmap.png" alt="" width="100%" />
 
 ## 6. Compute DOE across multiple pseudotime methods
 
@@ -284,10 +277,120 @@ plot(res_multi, scope = "branch",
 plot(res_multi, scope = "overall", type = "bar")
 ```
 
-<embed src="figures/branched/doe_bar_branch.pdf" width="100%" type="application/pdf" />
+<img src="figures/branched/doe_bar_branch.png" alt="" width="100%" /><img src="figures/branched/doe_radar_branch.png" alt="" width="100%" /><img src="figures/branched/doe_heatmap_branch.png" alt="" width="100%" /><img src="figures/branched/doe_bar_overall.png" alt="" width="100%" />
 
-<embed src="figures/branched/doe_radar_branch.pdf" width="100%" type="application/pdf" />
+## 8. What do the top methods actually look like?
 
-<embed src="figures/branched/doe_heatmap_branch.pdf" width="100%" type="application/pdf" />
+Ground-truth `Phenotype` next to each method’s pseudotime, on the same
+UMAP — the real result from this dataset in the BioTrajX manuscript
+(Figure S10a):
 
-<embed src="figures/branched/doe_bar_overall.pdf" width="100%" type="application/pdf" />
+``` r
+DimPlot(stem_cell, group.by = "Phenotype") + ggplot2::labs(title = "Ground truth")
+FeaturePlot(stem_cell, features = "Slingshot") + ggplot2::labs(title = "Slingshot")
+FeaturePlot(stem_cell, features = "Monocle3")  + ggplot2::labs(title = "Monocle3")
+# ... one panel per method
+```
+
+<img src="figures/branched/s10/S10_a_umap.png" alt="" width="100%" />
+
+## 9. Per-branch pseudotime, ranked by that branch’s own DOE score
+
+A method can do well on one lineage and poorly on the other —
+`scope = "branch"` scoring exists precisely so each branch is judged on
+its own markers and cell subset. Rank each branch’s method panels by
+that branch’s own `DOE_score` (not the aggregate) so the best-performing
+method for *that* lineage comes first:
+
+``` r
+ery_order <- res_multi$comparison_by_branch |>
+  subset(branch == "Stem_to_Ery") |>
+  (\(df) df$trajectory[order(-df$DOE_score)])()
+
+# FeaturePlot(subset(stem_cell, Phenotype %in% branch_filters$Stem_to_Ery$include),
+#             features = ery_order) # one panel per method, in DOE order
+```
+
+<img src="figures/branched/s10/S10_c_branch_umap_pseudotime.png" alt="" width="100%" />
+
+## 10. Module score trends, one row per branch
+
+Each branch has its own early/terminal modules (stem-progenitor vs.
+erythroid for Stem→Ery, stem-progenitor vs. B cell for Stem→B) and its
+own DOE-based method ordering:
+
+``` r
+stem_cell <- AddModuleScore(stem_cell, features = list(stem_progenitor_genes), name = "early_mod")
+stem_cell <- AddModuleScore(stem_cell, features = list(erythrocyte_genes),     name = "ery_mod")
+stem_cell <- AddModuleScore(stem_cell, features = list(bcell_genes),           name = "bcell_mod")
+
+plot_branch_trends <- function(branch, terminal_score_col, terminal_label) {
+  order_br <- subset(res_multi$comparison_by_branch, branch == !!branch)
+  order_br <- order_br$trajectory[order(-order_br$DOE_score)]
+  cells    <- colnames(stem_cell)[stem_cell$Phenotype %in% branch_filters[[branch]]$include]
+
+  df <- do.call(rbind, lapply(order_br, function(m) {
+    pt <- pseudotime_methods[[m]][cells]
+    data.frame(Pseudotime = pt,
+               Score  = c(stem_cell$early_mod1[cells], stem_cell[[terminal_score_col]][cells]),
+               Module = rep(c("Early", terminal_label), each = length(pt)),
+               Method = m)
+  }))
+  df$Method <- factor(df$Method, levels = order_br)
+
+  ggplot2::ggplot(df, ggplot2::aes(Pseudotime, Score, colour = Module)) +
+    ggplot2::geom_point(size = 0.2, alpha = 0.12) +
+    ggplot2::geom_smooth(method = "loess", se = TRUE, span = 0.5) +
+    ggplot2::facet_wrap(~ Method, nrow = 1, scales = "free") +
+    ggplot2::theme_minimal()
+}
+
+plot_branch_trends("Stem_to_Ery", "ery_mod1",   "Erythrocyte")
+plot_branch_trends("Stem_to_B",   "bcell_mod1", "B cell")
+```
+
+<img src="figures/branched/s10/S10_d_module_trends.png" alt="" width="100%" />
+
+## 11. Gene-level trends and cell-type recovery, per branch
+
+The same GAM-fit-gene-vs-pseudotime and violin-by-celltype views from
+the linear vignette apply per branch here. Below is the Stem→Erythroid
+branch; calling the same code with `branch_filters$Stem_to_B` and the
+B-cell marker genes produces the equivalent pair of panels for the
+Stem→B branch.
+
+``` r
+ery_cells <- colnames(stem_cell)[stem_cell$Phenotype %in% branch_filters$Stem_to_Ery$include]
+ery_order <- subset(res_multi$comparison_by_branch, branch == "Stem_to_Ery")
+ery_order <- ery_order$trajectory[order(-ery_order$DOE_score)]
+
+# GAM fits of a few marker genes vs. pseudotime, faceted by method
+gam_df <- do.call(rbind, lapply(ery_order, function(m) {
+  pt <- pseudotime_methods[[m]][ery_cells]
+  do.call(rbind, lapply(c("Cd34", "Alas2", "Gypa"), function(g) {
+    data.frame(Method = m, Gene = g, Pseudotime = pt, Expr = expr[g, ery_cells])
+  }))
+}))
+gam_df$Method <- factor(gam_df$Method, levels = ery_order)
+
+ggplot2::ggplot(gam_df, ggplot2::aes(Pseudotime, Expr)) +
+  ggplot2::geom_point(size = 0.15, alpha = 0.08, colour = "grey50") +
+  ggplot2::geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs")) +
+  ggplot2::facet_grid(Method ~ Gene, scales = "free_y") +
+  ggplot2::theme_minimal()
+
+# Violin of pseudotime by cell type, faceted by method
+violin_df <- do.call(rbind, lapply(ery_order, function(m) {
+  data.frame(Method = m, CellType = stem_cell$Phenotype[ery_cells],
+             Pseudotime = pseudotime_methods[[m]][ery_cells])
+}))
+violin_df$Method <- factor(violin_df$Method, levels = ery_order)
+
+ggplot2::ggplot(violin_df, ggplot2::aes(CellType, Pseudotime)) +
+  ggplot2::geom_violin(ggplot2::aes(fill = CellType), scale = "width") +
+  ggplot2::geom_boxplot(width = 0.15, outlier.size = 0.4) +
+  ggplot2::facet_wrap(~ Method, ncol = 3) +
+  ggplot2::theme_classic()
+```
+
+<img src="figures/branched/s10/S10_e_gam_stem_to_ery.png" alt="" width="100%" /><img src="figures/branched/s10/S10_f_violin_stem_to_ery.png" alt="" width="100%" />
