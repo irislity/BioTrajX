@@ -32,23 +32,35 @@ ordering?**
 
 ## 1. Load the dataset and pre-computed pseudotimes
 
+`GSE131847_seu.rds` ships with all eight methods' pseudotime already computed
+and stored as `@meta.data` columns (`Slingshot`, `CytoTRACE`, `Monocle3`,
+`DPT`, `SCORPIUS`, `TSCAN`, `PAGA-DPT`, `Palantir`), produced with
+`manuscript/scripts/real/run_ti_methods.R`'s `run_all_ti_methods()`:
+
 ```{r load-data}
 library(BioTrajX)
 library(Seurat)
 
 obj <- readRDS("data/GSE131847_seu.rds")
 DefaultAssay(obj) <- "SCT"
+
+ti_methods <- c("Slingshot", "CytoTRACE", "Monocle3", "DPT",
+                "SCORPIUS", "TSCAN", "PAGA-DPT", "Palantir")
+# named vectors (cell barcode -> pseudotime), not a plain data.frame subset,
+# so downstream cell-matching by name works
+ti_df <- setNames(lapply(ti_methods, function(m) setNames(obj@meta.data[[m]], colnames(obj))),
+                  ti_methods)
 ```
 
-As in the other vignettes, pseudotime vectors from multiple TI methods are
-expected as columns of a data frame keyed by cell — produced the same way,
-via `manuscript/scripts/real/run_ti_methods.R`'s `run_all_ti_methods()`:
+The code below is what generated those columns — kept here for reference or
+in case you want to add a method of your own on top:
 
 ```{r run-ti, eval = FALSE}
 source("manuscript/scripts/real/run_ti_methods.R")
 
 expr <- as.matrix(GetAssayData(obj, layer = "data"))
-ti_df <- run_all_ti_methods(expr, start_cell = colnames(expr)[which(obj$cell_type == "naive")[1]])
+ti_results <- run_all_ti_methods(expr, start_cell = colnames(expr)[which(obj$cell_type == "naive")[1]])
+obj <- AddMetaData(obj, ti_results)
 ```
 
 ## 2. Marker genes and DOE
@@ -65,13 +77,9 @@ ms <- get_markers_msigdb(
 )
 ms <- filter_markers(ms, obj, top_n = 30, min_detection = 0.10)
 
-ti_methods <- c("PAGA-DPT", "CytoTRACE", "Monocle3", "DPT", "Slingshot",
-                "SCORPIUS", "TSCAN", "Palantir")
-pt_list <- as.list(ti_df[, colnames(ti_df) %in% ti_methods, drop = FALSE])
-
 res <- compute_multi_doe_linear(
   expr_or_seurat   = obj,
-  pseudotime_list  = pt_list,
+  pseudotime_list  = ti_df,
   early_markers    = ms$early,
   terminal_markers = ms$terminal
 )
@@ -104,8 +112,8 @@ names(true_day) <- colnames(obj)
 doe_lookup <- setNames(res$comparison_summary$DOE_score,
                        res$comparison_summary$trajectory)
 
-day_corr <- do.call(rbind, lapply(names(pt_list), function(m) {
-  pt <- pt_list[[m]]
+day_corr <- do.call(rbind, lapply(names(ti_df), function(m) {
+  pt <- ti_df[[m]]
   cells <- intersect(names(pt)[!is.na(pt)], names(true_day))
   sp <- cor.test(pt[cells], true_day[cells], method = "spearman")
   data.frame(Method = m, DOE_score = doe_lookup[[m]],
@@ -130,8 +138,8 @@ highly are, independently, the methods that best recover known biology.
 ## 5. The same result at the per-cell level
 
 ```{r pseudotime-vs-day}
-day_long <- do.call(rbind, lapply(names(pt_list), function(m) {
-  pt <- pt_list[[m]]
+day_long <- do.call(rbind, lapply(names(ti_df), function(m) {
+  pt <- ti_df[[m]]
   cells <- intersect(names(pt)[!is.na(pt)], names(true_day))
   data.frame(Method = m, Day = as.character(obj$cell_type[cells]),
              Pseudotime = pt[cells])

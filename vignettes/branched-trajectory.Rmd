@@ -41,8 +41,11 @@ whichever pseudotime vectors you have to `compute_multi_doe_branched()`.
 | PAGA-DPT | Graph abstraction + DPT | Python | Requires `scanpy` conda env |
 | Palantir | Markov-chain fate probabilities | Python | Requires `palantir` conda env |
 
-To run all methods at once, source `manuscript/scripts/real/run_ti_methods.R`,
-call `run_all_ti_methods()`, and add the results to your Seurat object:
+`stem_cell.rds` ships with all eight methods' pseudotime already computed and
+stored as `@meta.data` columns — there's nothing to run before Step 1. They
+were produced with `manuscript/scripts/real/run_ti_methods.R`'s
+`run_all_ti_methods()`; the code below is what generated them, kept here for
+reference or in case you want to add a method of your own on top:
 
 ```{r run-ti, eval = FALSE}
 source("manuscript/scripts/real/run_ti_methods.R")
@@ -57,10 +60,6 @@ ti_results <- run_all_ti_methods(expr, start_cell = start_cell)
 # Add all pseudotime vectors as metadata columns
 stem_cell <- AddMetaData(stem_cell, ti_results)
 ```
-
-> **Prerequisite:** pseudotime values must already be computed and stored as
-> metadata columns in your Seurat object before running this vignette. See the
-> note in Step 2 for the expected column names.
 
 ## 1. Load the stem cell dataset
 
@@ -79,9 +78,8 @@ stem_cell <- readRDS("data/stem_cell.rds")
 
 ## 2. Check pre-computed pseudotimes
 
-This vignette assumes you have already run your trajectory inference methods and
-stored the resulting pseudotime vectors as Seurat metadata columns. The expected
-columns (added by `run_all_ti_methods()` + `AddMetaData()`) are:
+The dataset already carries the pseudotime vectors from `run_all_ti_methods()`
+as metadata columns — nothing to compute here, just confirm they're present:
 
 | Column | Method | Language |
 |---|---|---|

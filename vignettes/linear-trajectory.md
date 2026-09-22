@@ -23,9 +23,13 @@ of them — pass whichever pseudotime vectors you have to
 | PAGA-DPT | Graph abstraction + DPT | Python | Requires `scanpy` conda env |
 | Palantir | Markov-chain fate probabilities | Python | Requires `palantir` conda env |
 
-To run all methods at once, source
-`manuscript/scripts/real/run_ti_methods.R`, call `run_all_ti_methods()`,
-and add the results to your Seurat object:
+`cd8t.rds` ships with all eight methods’ pseudotime already computed and
+stored as `@meta.data` columns (`Slingshot`, `CytoTRACE`, `Monocle3`,
+`DPT`, `SCORPIUS`, `TSCAN`, `PAGA-DPT`, `Palantir`) — there’s nothing to
+run before Step 1. They were produced with
+`manuscript/scripts/real/run_ti_methods.R`’s `run_all_ti_methods()`; the
+code below is what generated them, kept here for reference or in case
+you want to add a method of your own on top:
 
 ``` r
 source("manuscript/scripts/real/run_ti_methods.R")
