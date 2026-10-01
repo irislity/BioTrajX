@@ -57,6 +57,8 @@ result <- compute_single_doe_linear(expr, pseudotime, early_markers, terminal_ma
 
 # compare multiple trajectories
 comparison <- compute_multi_doe_linear(expr, pseudotime_list, early_markers, terminal_markers)
+
+# visualization of DOE scores
 plot(comparison, type = "bar")
 plot(comparison, type = "radar")
 plot(comparison, type = "heatmap")
@@ -68,6 +70,7 @@ For a branched trajectory, provide one early and one terminal marker set per
 lineage and, when needed, restrict each branch to its own cell-state labels:
 
 ```r
+# compare multiple trajectories
 branched <- compute_multi_doe_branched(
   expr_or_seurat        = expr,
   pseudotime_list       = pseudotime_list,
@@ -78,10 +81,10 @@ branched <- compute_multi_doe_branched(
   cluster_labels        = cell_state,
   branch_filters        = branch_filters
 )
-
+# visualization of DOE scores
 plot(branched, scope = "branch", type = "heatmap")
 plot(branched, scope = "overall", type = "bar")
-plot(res, scope = "branch", type = "radar", branch_mode = "facet")
+plot(branched, scope = "branch", type = "radar", branch_mode = "facet")
 ```
 
 ### Marker Sets
