@@ -19,11 +19,13 @@ compute_single_doe_linear(
   assay = NULL,
   slot = "data",
   plot_E = TRUE,
+  plot_metrics = NULL,
   verbose = FALSE,
   branch_include = NULL,
   branch_exclude = NULL,
   branch_min_cells = 10,
   drop_unused_levels = TRUE,
+  pseudotime_rescale = TRUE,
   tol = 1e-08
 )
 }
@@ -61,13 +63,27 @@ endpoint validity is estimated inside \code{metrics_e()}.}
 \code{"counts"}, or \code{"scale.data"}.}
 
 \item{plot_E}{Logical; if \code{TRUE}, allow \code{metrics_e()} to produce diagnostic
-density plots when using the GMM mode (default \code{TRUE}).}
+density plots when using the GMM mode (default \code{TRUE}). Only takes effect
+when \code{plot_metrics} is \code{TRUE}; \code{plot_metrics} gates all plotting, and
+\code{plot_E} fine-tunes this one plot within that.}
+
+\item{plot_metrics}{Logical; if \code{TRUE}, draw the D/O/E diagnostic plots
+(\code{plot_metrics_d()}, \code{plot_metrics_o()}, \code{plot_metrics_e()}, and, when
+\code{plot_E} is also \code{TRUE}, the internal GMM density plot from
+\code{metrics_e()}) after computing the metrics. Defaults to \code{NULL}, which is
+treated as \code{FALSE} (no plotting at all).}
 
 \item{verbose}{Logical; if \code{TRUE}, print diagnostic messages when component
 metrics fail and are caught (default \code{FALSE}).}
 
 \item{drop_unused_levels}{Logical; if \code{TRUE}, drop unused factor levels in
 the subsetted cluster labels (default \code{TRUE}).}
+
+\item{pseudotime_rescale}{Logical; if \code{TRUE} (default), min-max normalize
+\code{pseudotime} to [0,1] before computing D/O/E. Set to \code{FALSE} to use the
+raw pseudotime values as provided. D/O/E are each invariant to monotonic
+transforms of pseudotime, so this only affects the scale shown in
+diagnostic plots, not the computed scores.}
 }
 \value{
 An object of class \code{"doe_results"}, a list with elements:

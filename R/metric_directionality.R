@@ -6,8 +6,8 @@
 #' @param pseudotime numeric vector of pseudotime values (length = ncol(expr))
 #'
 #' @return A list with:
-#'   \item{D_term}{terminal directionality score in [0,1]}
-#'   \item{D_early}{early directionality score in [0,1]}
+#'   \item{D_term}{terminal directionality score in \[0,1\]}
+#'   \item{D_early}{early directionality score in \[0,1\]}
 #'   \item{s_i_early}{per-cell early program scores}
 #'   \item{s_i_term}{per-cell terminal program scores}
 #' @export

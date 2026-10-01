@@ -171,6 +171,79 @@ test_that("compute_single_doe_linear: data.frame input is accepted", {
 })
 
 # =============================================================================
+# pseudotime_rescale (min-max normalization option)
+# =============================================================================
+
+test_that("compute_single_doe_linear: pseudotime_rescale is TRUE by default and does not change scores", {
+  f  <- make_gaussian_fixture()
+  cl <- make_cluster_labels(f)
+  # Simulate a TI method emitting pseudotime on a large, arbitrary raw scale
+  pt_raw <- f$pseudotime * 500 + 100
+
+  res_default <- suppressWarnings(
+    compute_single_doe_linear(
+      f$expr, pt_raw, f$early_markers, f$term_markers,
+      cluster_labels = cl, early_clusters = "early_cl", terminal_clusters = "term_cl",
+      E_method = "clusters", plot_E = FALSE
+    )
+  )
+  res_explicit_true <- suppressWarnings(
+    compute_single_doe_linear(
+      f$expr, pt_raw, f$early_markers, f$term_markers,
+      cluster_labels = cl, early_clusters = "early_cl", terminal_clusters = "term_cl",
+      E_method = "clusters", plot_E = FALSE, pseudotime_rescale = TRUE
+    )
+  )
+  expect_equal(res_default$DOE_score, res_explicit_true$DOE_score)
+})
+
+test_that("compute_single_doe_linear: pseudotime_rescale = TRUE/FALSE give identical D/O/E/DOE_score", {
+  f  <- make_gaussian_fixture()
+  cl <- make_cluster_labels(f)
+  pt_raw <- f$pseudotime * 500 + 100   # arbitrary raw units, not [0,1]
+
+  res_raw <- suppressWarnings(
+    compute_single_doe_linear(
+      f$expr, pt_raw, f$early_markers, f$term_markers,
+      cluster_labels = cl, early_clusters = "early_cl", terminal_clusters = "term_cl",
+      E_method = "clusters", plot_E = FALSE, pseudotime_rescale = FALSE
+    )
+  )
+  res_rescaled <- suppressWarnings(
+    compute_single_doe_linear(
+      f$expr, pt_raw, f$early_markers, f$term_markers,
+      cluster_labels = cl, early_clusters = "early_cl", terminal_clusters = "term_cl",
+      E_method = "clusters", plot_E = FALSE, pseudotime_rescale = TRUE
+    )
+  )
+
+  # D/O/E are each invariant to monotonic transforms of pseudotime, so
+  # rescaling must never change the computed scores.
+  expect_equal(res_raw$D, res_rescaled$D)
+  expect_equal(res_raw$O$O, res_rescaled$O$O)
+  expect_equal(res_raw$E[c("E_early", "E_term", "E_comp")],
+               res_rescaled$E[c("E_early", "E_term", "E_comp")])
+  expect_equal(res_raw$DOE_score, res_rescaled$DOE_score)
+})
+
+test_that("compute_single_doe_linear: pseudotime_rescale = FALSE works on raw-scale pseudotime", {
+  f  <- make_linear_fixture()
+  cl <- make_cluster_labels(f)
+  pt_raw <- f$pseudotime * 1000 + 50
+
+  expect_no_error(
+    res <- suppressWarnings(
+      compute_single_doe_linear(
+        f$expr, pt_raw, f$early_markers, f$term_markers,
+        cluster_labels = cl, early_clusters = "early_cl", terminal_clusters = "term_cl",
+        E_method = "clusters", plot_E = FALSE, pseudotime_rescale = FALSE
+      )
+    )
+  )
+  expect_s3_class(res, "doe_results")
+})
+
+# =============================================================================
 # compute_multi_doe_linear
 # =============================================================================
 

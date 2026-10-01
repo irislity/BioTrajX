@@ -8,9 +8,11 @@ truth. This dataset (GSE131847, an LCMV infection time course spanning
 naive → day-90 post-infection CD8+ T cells) is the one case in the
 BioTrajX manuscript where the *true* biological ordering is known for
 every cell: each cell is labeled with its actual day of infection. That
-makes it possible to ask directly: **does a method’s DOE score —
-computed without ever looking at that label — predict how well its
-pseudotime recovers the real day-of-infection ordering?**
+makes it possible to evaluate directly, following the manuscript’s own
+framing for this dataset (Fig. S8, *“BioTrajX DOE score tracks
+ground-truth recovery of infection timing”*): **is a method’s DOE score
+— computed without ever looking at that label — aligned with how well
+its pseudotime recovers the real day-of-infection ordering?**
 
 ## 1. Load the dataset and pre-computed pseudotimes
 
@@ -68,6 +70,13 @@ res <- compute_multi_doe_linear(
 )
 ```
 
+These eight methods report pseudotime on different raw scales (e.g.
+CytoTRACE’s `1 - score` convention vs. Monocle3’s graph-distance units), so
+`compute_multi_doe_linear()` min-max normalizes each to [0,1] by default
+(`pseudotime_rescale = TRUE`) before scoring — this only affects the scale
+shown in diagnostic plots, not the D/O/E scores, which are invariant to
+monotonic rescaling of pseudotime.
+
 ## 3. What the trajectories look like
 
 Ground-truth day of infection next to each method’s pseudotime, and the
@@ -75,7 +84,7 @@ resulting module-score trends:
 
 <img src="figures/ground_truth/S8_a_umap.png" alt="" width="100%" /><img src="figures/ground_truth/S8_b_module_trends.png" alt="" width="100%" />
 
-## 4. Does the DOE score predict ground-truth recovery?
+## 4. Does the DOE score track ground-truth recovery?
 
 For each method, compute the Spearman correlation between its pseudotime
 and the true numeric day of infection — this is the actual recovery
@@ -100,8 +109,10 @@ day_corr <- do.call(rbind, lapply(names(ti_df), function(m) {
              spearman_rho = unname(sp$estimate))
 }))
 
-# The number that answers the question: does DOE score predict recovery
-# of the known ground truth, across methods?
+# The number that answers the question: is DOE score aligned with recovery
+# of the known ground truth, across methods? In the manuscript (Fig. S8D),
+# DOE score was strongly associated with recovery of the true temporal
+# ordering across the eight TI methods (Pearson's r = 0.92).
 cor.test(day_corr$DOE_score, day_corr$spearman_rho, method = "pearson")
 ```
 
@@ -110,7 +121,9 @@ cor.test(day_corr$DOE_score, day_corr$spearman_rho, method = "pearson")
 Each point is one TI method: its DOE score (x-axis, computed label-free)
 vs. how well its pseudotime actually recovered the true day-of-infection
 ordering (y-axis, Spearman ρ against ground truth, which BioTrajX never
-sees). The positive trend is the validation result: methods BioTrajX
+sees). The positive trend is the validation result — in the manuscript,
+DOE score was strongly associated with recovery of the true temporal
+ordering across methods (Pearson’s r = 0.92; Fig. S8D): methods BioTrajX
 scores highly are, independently, the methods that best recover known
 biology.
 

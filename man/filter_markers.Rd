@@ -7,7 +7,7 @@
 filter_markers(ms, expr, top_n = 30L, min_detection = 0.1)
 }
 \arguments{
-\item{ms}{A \link{marker_set} returned by \code{get_markers_msigdb()},
+\item{ms}{A \code{marker_set} returned by \code{get_markers_msigdb()},
 \code{get_markers_cellmarker()}, \code{get_markers_go()}, or \code{.marker_set()}.}
 
 \item{expr}{A genes-by-cells expression matrix (dense or sparse), or a
@@ -22,12 +22,12 @@ dropout filter.  Default \code{30L}.}
 which a gene must be detected (non-zero) to be retained.  Default \code{0.10}.}
 }
 \value{
-A \link{marker_set} with filtered \verb{$early} and \verb{$terminal} vectors.
+A \code{marker_set} with filtered \verb{$early} and \verb{$terminal} vectors.
 The \verb{$source} field is appended with \code{" [filtered]"} and the original
 gene counts and filter parameters are stored in \verb{$metadata}.
 }
 \description{
-Applies a two-step expression-based filter to a \link{marker_set}:
+Applies a two-step expression-based filter to a \code{marker_set}:
 }
 \details{
 \enumerate{
@@ -41,7 +41,7 @@ expression means a stronger, more detectable signal per cell.
 
 Both steps are purely expression-based with no pseudotime or cluster
 assumptions, so there is no circularity with downstream DOE scoring.
-Accepts dense matrices, sparse \link[Matrix:dgCMatrix]{Matrix::dgCMatrix} objects, or \link[Seurat:Seurat-package]{Seurat::Seurat}
+Accepts dense matrices, sparse \link[Matrix:dgCMatrix-class]{Matrix::dgCMatrix} objects, or \link[Seurat:Seurat-package]{Seurat::Seurat}
 objects (normalised data layer is extracted automatically).
 }
 \examples{

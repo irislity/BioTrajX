@@ -16,6 +16,7 @@ compute_multi_doe_linear(
   assay = NULL,
   slot = "data",
   plot_E = TRUE,
+  plot_metrics = NULL,
   verbose = TRUE,
   parallel = FALSE,
   n_cores = NULL,
@@ -23,6 +24,7 @@ compute_multi_doe_linear(
   branch_exclude = NULL,
   branch_min_cells = 10,
   drop_unused_levels = TRUE,
+  pseudotime_rescale = TRUE,
   tol = 1e-08
 )
 }
@@ -60,7 +62,12 @@ If \code{NULL}, defaults to \code{Seurat::DefaultAssay()}.}
 extract (e.g., \code{"data"}, \code{"counts"}). Default \code{"data"}.}
 
 \item{plot_E}{Logical; if \code{TRUE}, produce diagnostic density plots when
-\code{E_method} uses GMM.}
+\code{E_method} uses GMM. Only takes effect when \code{plot_metrics} is \code{TRUE}.}
+
+\item{plot_metrics}{Logical; if \code{TRUE}, draw the D/O/E diagnostic plots for
+each trajectory, including the \code{plot_E} GMM plot when also \code{TRUE} (see
+\code{\link[=compute_single_doe_linear]{compute_single_doe_linear()}}). Defaults to \code{NULL}, which is treated as
+\code{FALSE} (no plotting at all).}
 
 \item{verbose}{Logical; print progress.}
 
@@ -70,6 +77,10 @@ use \strong{parallel} workers.}
 \item{n_cores}{Integer number of cores. If \code{NULL}, uses \code{detectCores()-1}.}
 
 \item{drop_unused_levels}{Logical; drop unused factor levels (where relevant).}
+
+\item{pseudotime_rescale}{Logical; if \code{TRUE} (default), min-max normalize
+each trajectory's pseudotime to [0,1] before computing D/O/E. See
+\code{\link[=compute_single_doe_linear]{compute_single_doe_linear()}} for details.}
 
 \item{tol}{Numerical tolerance for internal numerical checks.}
 }

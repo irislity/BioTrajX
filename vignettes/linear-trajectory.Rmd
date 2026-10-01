@@ -19,9 +19,14 @@ knitr::opts_chunk$set(
 )
 ```
 
-This article walks through applying BioTrajX's DOE metrics to a real CD8⁺ T cell
-exhaustion dataset (Naive → Terminal exhaustion), comparing multiple pseudotime
-methods using the D, O, and E metrics.
+This article walks through applying BioTrajX's DOE metrics to the CD8⁺ T-cell
+exhaustion dataset used as the linear-trajectory application in the BioTrajX
+manuscript (Fig. S9): head and neck squamous cell carcinoma tumor-infiltrating
+and peripheral-blood CD8⁺ T cells from GSE164690 (Kürten et al. 2021), annotated
+with ProjecTILs into five functional states — CD8.NaiveLike, CD8.CM, CD8.EM,
+CD8.TPEX, and CD8.TEX — that define the expected naive-like-to-exhausted
+progression. We compare eight pseudotime methods against this progression using
+the D, O, and E metrics.
 
 ## Supported trajectory inference methods
 
@@ -97,40 +102,34 @@ knitr::include_graphics("figures/linear/umap_cytotrace.png")
 ```{r prepare}
 expr <- as.matrix(GetAssayData(cd8t, layer = "data"))
 
-# Early-like markers: selected by strongest negative Spearman correlation with
-# slingshot pseudotime among biologically interpretable genes (ribosomal/housekeeping
-# excluded). These genes monotonically decrease along the CD8+ T cell exhaustion
-# trajectory, analogous to early genes in the simulation vignette.
-# ModuleScore: CD8.NaiveLike = +0.38, all exhausted clusters negative (to -0.65).
-# Refs: Wherry & Kurachi 2015 (Nat Rev Immunol); Miller et al. 2019 (Nat Immunol)
-early <- c(
-  "LTB", "LDHB", "LEF1", "KLF2", "MAL",
-  "SELL", "IL7R", "CCR7", "TCF7"
+# Early and terminal marker sets, retrieved from MSigDB exactly as in the
+# BioTrajX manuscript (Fig. S9 methods): early markers from the
+# KAECH_NAIVE_VS_DAY8_EFF_CD8_TCELL_UP set (C7 immunologic signatures) and
+# terminal markers from the JIANG_MELANOMA_TRM2_CD8 set (C2 curated gene
+# sets), both filtered to the top 30 genes detected in at least 10% of cells.
+# install.packages("msigdbr")
+ms <- get_markers_msigdb(
+  early      = "KAECH_NAIVE_VS_DAY8_EFF_CD8_TCELL_UP",
+  terminal   = "JIANG_MELANOMA_TRM2_CD8",
+  collection = NULL,   # search all collections; the two sets live in C7 and C2
+  species    = "Homo sapiens"
 )
+ms <- filter_markers(ms, cd8t, top_n = 30, min_detection = 0.10)
 
-# Terminal markers: selected by strongest positive Spearman correlation with
-# slingshot pseudotime — effector/exhaustion genes that monotonically increase
-# along the trajectory (score: NaiveLike = -0.54, TEX = +1.30).
-# Refs: Sade-Feldman et al. 2018 (Cell); Guo et al. 2018 (Nat Med)
-term <- c(
-  "SRGN", "GZMK", "CCL5", "NKG7", "RGS1",
-  "CST7", "GZMA", "CXCL13", "TIGIT", "LAG3"
-)
+early <- ms$early
+term  <- ms$terminal
 
 cluster <- cd8t$functional.cluster
 ```
 
 ```{r}
-early <- c("CCR7", "TCF7", "IL7R")
-term  <- c("PDCD1", "LAG3", "HAVCR2", "TOX", "TIGIT", "CTLA4", "CXCL13", "ENTPD1", "ITGAE")
-
 cd8t <- AddModuleScore(cd8t,
-  features = early,
+  features = list(early),
   name = 'early_markers'
 )
 
 cd8t <- AddModuleScore(cd8t,
-  features = term,
+  features = list(term),
   name = 'term_markers'
 )
 ```
@@ -141,34 +140,29 @@ FeaturePlot(cd8t, features = "term_markers1") + ggplot2::ggtitle("Terminal Marke
 ```
 
 
-### Alternative: retrieve markers from MSigDB
+### Alternative: manually curated markers
 
-The vectors above were curated manually from the literature.  As an alternative,\
-`get_markers_msigdb()` can pull the same biological programs directly from MSigDB\
-C2 (curated gene sets).  The result is a `marker_set` whose `$early` and\
-`$terminal` slots are drop-in replacements for the character vectors above.
+If you would rather not depend on `msigdbr` or want to substitute your own
+literature-curated gene list, any character vector works as a drop-in
+replacement for `ms$early` / `ms$terminal` — for example:
 
-```{r msigdb-alt, eval = FALSE}
-# install.packages("msigdbr")
-ms <- get_markers_msigdb(
-  early      = "GOLDRATH_NAIVE_VS_EFF_CD8_TCELL_UP",
-  terminal   = "GSE9650_NAIVE_VS_EXHAUSTED_CD8_TCELL_UP",
-  collection = "C7"   # immunologic signatures
-)
+```{r manual-alt, eval = FALSE}
+# Illustrative manually curated alternative to the MSigDB sets above
+early_manual <- c("LTB", "LDHB", "LEF1", "KLF2", "MAL", "SELL", "IL7R", "CCR7", "TCF7")
+term_manual  <- c("SRGN", "GZMK", "CCL5", "NKG7", "RGS1", "CST7", "GZMA", "CXCL13", "TIGIT", "LAG3")
 
-# equivalent to passing `early` and `term` by hand
 res_single <- compute_single_doe_linear(
   cd8t,
   cd8t$Slingshot,
-  early_markers    = ms$early,
-  terminal_markers = ms$terminal
+  early_markers    = early_manual,
+  terminal_markers = term_manual
 )
 ```
 
-You can also search by keyword when you do not know the exact set name:
+You can also search MSigDB by keyword when you do not know the exact set name:
 
 ```{r msigdb-pattern, eval = FALSE}
-ms <- get_markers_msigdb(
+ms_alt <- get_markers_msigdb(
   early      = "NAIVE.*CD8",
   terminal   = "EXHAUST.*CD8",
   collection = "C7",
@@ -222,6 +216,15 @@ res <- compute_multi_doe_linear(
   terminal_markers = term
 )
 ```
+
+Methods like CytoTRACE or Monocle3 can emit pseudotime on very different
+raw numeric ranges. `compute_multi_doe_linear()` (and
+`compute_single_doe_linear()`) min-max normalize each method's pseudotime
+to [0,1] by default (`pseudotime_rescale = TRUE`) so every method's
+diagnostic plots share a common scale. This never changes the D/O/E
+scores themselves — they're invariant to monotonic rescaling of
+pseudotime — so set `pseudotime_rescale = FALSE` only if you specifically
+want each method's native pseudotime units preserved.
 
 ## 7. Visualize multi-trajectory DOE results
 
@@ -350,13 +353,20 @@ ggplot2::ggplot(violin_df, ggplot2::aes(CellType, Pseudotime)) +
 knitr::include_graphics("figures/linear/s9/S9_e_violin_celltype.png")
 ```
 
-## 12. Using DOE to sanity-check a root cell choice
+## 12. Using DOE to sanity-check a root cell choice (Fig. S11)
 
 Several TI methods (Monocle3 among them) require you to pick a root cell —
 and a wrong root silently produces a plausible-looking but biologically
 backwards trajectory. BioTrajX's DOE score can be used to check that choice
 *before* trusting the result: run the same method from several candidate
 roots and compare their DOE scores.
+
+This reproduces the root-selection analysis in the BioTrajX manuscript
+(Fig. S11) on this same CD8⁺ T-cell exhaustion dataset. The three roots drawn
+from the CD8.NaiveLike population scored clearly higher — CytoTRACE-selected
+root DOE = 0.648, naive-marker-selected root DOE = 0.629, cluster-centroid
+root DOE = 0.606 — than roots placed in more differentiated states: CD8.CM
+(0.350), and CD8.EM/CD8.TPEX/CD8.TEX (0.222–0.224).
 
 Below, Monocle3 is run independently from 7 candidate root cells: three
 different heuristics for locating the naive-like population (a CytoTRACE

@@ -1,10 +1,16 @@
 Evaluating Branched Pseudotime Trajectories with BioTrajX
 ================
 
-This article walks through applying BioTrajX’s DOE metrics to a branched
-stem cell differentiation dataset. Because the trajectory splits into
-two lineages (Stem → Erythroid and Stem → B cell), BioTrajX requires
-**per-branch** marker sets and cell filters — handled by
+This article walks through applying BioTrajX’s DOE metrics to the
+branched haematopoietic stem cell differentiation dataset used in the
+BioTrajX manuscript (Fig. S10): an aging mouse HSC dataset (Kowalczyk et
+al. 2015), obtained as a preprocessed, batch-corrected expression matrix
+from the CytoTRACE website (Gulati et al. 2020). Long-term HSCs,
+short-term HSCs, and multipotent progenitors from young and old mice
+form a shared stem/progenitor compartment that bifurcates into an
+erythroid lineage and a B-cell lineage. Because the trajectory splits
+into two lineages (Stem → Erythroid and Stem → B cell), BioTrajX
+requires **per-branch** marker sets and cell filters — handled by
 `compute_multi_doe_branched()`.
 
 ## Supported trajectory inference methods
@@ -111,51 +117,52 @@ progenitor identity), while the terminal markers differ.
 ``` r
 expr <- as.matrix(GetAssayData(stem_cell, layer = "data"))
 
-# Stem/progenitor markers — shared early state for both lineages.
-# Selected by strongest negative Spearman correlation with Slingshot pseudotime
-# in both branches simultaneously.
-# Refs: Nestorowa et al. 2016 (Blood); Orkin & Zon 2008 (Cell)
-stem_progenitor_genes <- c(
-  "Kit", "Tslp", "Eltd1", "Rab38", "Cd34",
-  "Ppic", "Fkbp11", "Cd27"
+# Marker sets, retrieved from MSigDB exactly as in the BioTrajX manuscript
+# (Fig. S10 methods): a shared stem/progenitor early set drawn from
+# HAY_BONE_MARROW_CD34_POS_HSC (C8 cell type signatures; Human Cell Atlas bone
+# marrow CD34+ HSC signature, ortholog-mapped to mouse), an erythroid terminal
+# set from WP_ERYTHROPOIESIS (C2 WikiPathways), and a B-cell terminal set from
+# HADDAD_B_LYMPHOCYTE_PROGENITOR (C2 curated gene sets). All sets are filtered
+# to the top 30 genes detected in at least 10% of cells.
+ms_ery <- get_markers_msigdb(
+  early      = "HAY_BONE_MARROW_CD34_POS_HSC",
+  terminal   = "WP_ERYTHROPOIESIS",
+  collection = NULL,
+  species    = "Mus musculus"
 )
+ms_ery <- filter_markers(ms_ery, stem_cell, top_n = 30, min_detection = 0.10)
 
-# Erythroid terminal markers — strongest positive Spearman correlation with
-# Slingshot pseudotime in the Stem→Ery branch.
-# ModuleScore: Erythrocytes = +3.0, Ery_progenitors = +2.15.
-# Refs: Paul et al. 2015 (Cell); Orkin & Zon 2008 (Cell)
-erythrocyte_genes <- c(
-  "Snca", "Hbb-b1", "Hba-a1", "Hba-a2", "Alas2",
-  "Bpgm", "Hbb-b2", "Trim10", "Gypa", "Slc4a1"
+ms_b <- get_markers_msigdb(
+  early      = "HAY_BONE_MARROW_CD34_POS_HSC",
+  terminal   = "HADDAD_B_LYMPHOCYTE_PROGENITOR",
+  collection = NULL,
+  species    = "Mus musculus"
 )
+ms_b <- filter_markers(ms_b, stem_cell, top_n = 30, min_detection = 0.10)
 
-# B cell terminal markers — strongest positive Spearman correlation with
-# Slingshot pseudotime in the Stem→B branch.
-# ModuleScore: Immature_B = +1.23, Mature_B = +0.99.
-# Refs: Paul et al. 2015 (Cell); Nestorowa et al. 2016 (Blood)
-bcell_genes <- c(
-  "Pou2af1", "Vpreb3", "Slamf7", "Blnk", "Cd79a",
-  "Cd79b", "Cd19", "Ebf1", "Irf4"
-)
+# Shared stem/progenitor markers, filtered identically for both branches
+stem_progenitor_genes <- ms_ery$early
+erythrocyte_genes     <- ms_ery$terminal
+bcell_genes           <- ms_b$terminal
 ```
 
-### Alternative: build marker lists from a data frame
+### Alternatives: CellMarker or manually curated markers
 
 When markers for multiple branches live in a single table — whether from
 a CellMarker download or an in-house spreadsheet —
-`get_markers_cellmarker()` and `markers_to_list()` replace the manual
-construction above.
+`get_markers_cellmarker()` and `markers_to_list()` are a drop-in
+replacement for the MSigDB calls above.
 
 ``` r
 # --- Option A: auto-download from CellMarker (requires internet) ---
-ms_ery <- get_markers_cellmarker(
+ms_ery_cm <- get_markers_cellmarker(
   early    = "Hematopoietic stem cell",
   terminal = "Red blood cell (erythrocyte)",
   species  = "Mouse",
   tissue   = "Bone marrow"
 )
 
-ms_b <- get_markers_cellmarker(
+ms_b_cm <- get_markers_cellmarker(
   early    = "Hematopoietic stem cell",
   terminal = "B cell",
   species  = "Mouse",
@@ -165,7 +172,18 @@ ms_b <- get_markers_cellmarker(
 # --- Option B: use a pre-downloaded file ---
 # df <- read.table("Mouse_cell_markers.txt",
 #                  sep = "\t", header = TRUE, quote = "", fill = TRUE)
-# ms_ery <- get_markers_cellmarker("Hematopoietic stem cell", "Erythrocyte", df = df)
+# ms_ery_cm <- get_markers_cellmarker("Hematopoietic stem cell", "Erythrocyte", df = df)
+```
+
+Or supply your own literature-curated gene vectors directly — any
+character vector works as a drop-in replacement for `ms_ery$early` /
+`ms_ery$terminal` / `ms_b$terminal`:
+
+``` r
+# Illustrative manually curated alternative to the MSigDB sets above
+stem_progenitor_manual <- c("Kit", "Tslp", "Eltd1", "Rab38", "Cd34", "Ppic", "Fkbp11", "Cd27")
+erythrocyte_manual <- c("Snca", "Hbb-b1", "Hba-a1", "Hba-a2", "Alas2", "Bpgm", "Hbb-b2", "Trim10", "Gypa", "Slc4a1")
+bcell_manual <- c("Pou2af1", "Vpreb3", "Slamf7", "Blnk", "Cd79a", "Cd79b", "Cd19", "Ebf1", "Irf4")
 ```
 
 ## 4. Define branched trajectories
@@ -255,6 +273,14 @@ res_multi <- compute_multi_doe_branched(
 )
 ```
 
+As in the linear case, `compute_multi_doe_branched()` (and
+`compute_single_doe_branched()`) min-max normalize each branch's
+pseudotime to [0,1] by default (`pseudotime_rescale = TRUE`), independently
+per branch, so the per-branch diagnostic plots stay comparable across
+methods even when raw pseudotime ranges differ. D/O/E scores are
+unaffected either way; set `pseudotime_rescale = FALSE` to keep native
+units.
+
 ## 7. Visualize multi-method branched DOE results
 
 ``` r
@@ -281,7 +307,14 @@ plot(res_multi, scope = "overall", type = "bar")
 
 Ground-truth `Phenotype` next to each method’s pseudotime, on the same
 UMAP — the real result from this dataset in the BioTrajX manuscript
-(Figure S10a):
+(Figure S10a). In the manuscript, the two branches ranked TI methods
+differently: in the erythroid branch, CytoTRACE was highest (DOE =
+0.80), followed by DPT (0.67) and SCORPIUS (0.63); in the B-cell branch,
+Slingshot (0.59) and Palantir (0.58) ranked highest, followed by
+PAGA-DPT (0.52), while Monocle3 showed almost no agreement with the
+expected progression (DOE = 0.04). This branch-dependent ranking is why
+BioTrajX scores each lineage separately rather than reporting one number
+per method.
 
 ``` r
 DimPlot(stem_cell, group.by = "Phenotype") + ggplot2::labs(title = "Ground truth")

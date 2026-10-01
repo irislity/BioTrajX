@@ -74,7 +74,20 @@
 #' @param assay Assay to use when `expr_or_seurat` is a Seurat object.
 #' @param slot Assay slot to use when `expr_or_seurat` is a Seurat object.
 #' @param plot_E Logical; pass through to `metrics_e()` plotting helpers.
+#'   Only takes effect when `plot_metrics` is `TRUE`; `plot_metrics` gates
+#'   all plotting, and `plot_E` fine-tunes this one plot within that.
+#' @param plot_metrics Logical; if `TRUE`, draw the D/O/E diagnostic plots
+#'   (`plot_metrics_d()`, `plot_metrics_o()`, `plot_metrics_e()`, and, when
+#'   `plot_E` is also `TRUE`, the internal GMM density plot from
+#'   `metrics_e()`) for each branch after computing its metrics. Defaults to
+#'   `NULL`, which is treated as `FALSE` (no plotting at all).
 #' @param verbose Logical; print progress messages.
+#' @param pseudotime_rescale Logical; if `TRUE` (default), min-max normalize
+#'   each branch's pseudotime to \[0,1\] (independently, after subsetting)
+#'   before computing D/O/E. Set to `FALSE` to use the raw pseudotime values
+#'   as provided. D/O/E are each invariant to monotonic transforms of
+#'   pseudotime, so this only affects the scale shown in diagnostic plots,
+#'   not the computed scores.
 #' @param tol Numerical tolerance forwarded to `metrics_o()` when supported.
 #'
 #' @return A list containing branch-level DOE results, aggregated scores, and
@@ -92,7 +105,9 @@ compute_single_doe_branched <- function(expr_or_seurat,
                                          assay = NULL,
                                          slot = "data",
                                          plot_E = FALSE,
+                                         plot_metrics = NULL,
                                          verbose = TRUE,
+                                         pseudotime_rescale = TRUE,
                                          tol = 1e-8) {
   E_method <- match.arg(E_method)
 
@@ -196,6 +211,14 @@ compute_single_doe_branched <- function(expr_or_seurat,
       sub$cells <- sub$cells[pt_valid]
     }
 
+    # Rescale this branch's pseudotime to [0,1] via min-max normalization so
+    # branches/trajectories are comparable (e.g. in diagnostic plots). D/O/E
+    # are each invariant to monotonic transforms of pseudotime, so this never
+    # changes their scores (mirrors compute_single_doe_linear()).
+    if (isTRUE(pseudotime_rescale)) {
+      sub$pt <- .minmax_normalize(sub$pt, label = "pseudotime values")
+    }
+
     early_markers    <- early_markers_list[[b]]
     terminal_markers <- terminal_markers_list[[b]]
     # ---- D ----
@@ -230,6 +253,8 @@ compute_single_doe_branched <- function(expr_or_seurat,
     early_scores <- if (length(n_idx)) colMeans(sub$expr[n_idx, , drop=FALSE]) else rep(NA_real_, ncol(sub$expr))
     term_scores  <- if (length(t_idx)) colMeans(sub$expr[t_idx, , drop=FALSE]) else rep(NA_real_, ncol(sub$expr))
 
+    # plot_metrics gates all plotting; plot_E only fine-tunes the internal
+    # GMM density plot when plot_metrics is TRUE.
     E_res <- tryCatch({
       metrics_e(
         sub$pt,
@@ -237,11 +262,15 @@ compute_single_doe_branched <- function(expr_or_seurat,
         early_marker_scores = early_scores,
         terminal_marker_scores = term_scores,
         early_clusters = NULL, terminal_clusters = NULL,
-        method = E_method, plot = isTRUE(plot_E)
+        method = E_method, plot = isTRUE(plot_metrics) && isTRUE(plot_E)
       )
     }, error = function(e) list(E_early=NA_real_, E_term=NA_real_, E_comp=NA_real_, error=e$message))
 
-
+    if (isTRUE(plot_metrics)) {
+      plot_metrics_d(sub$pt, D_res)
+      plot_metrics_o(sub$expr, sub$pt, O_res, early_markers, terminal_markers)
+      plot_metrics_e(E_res)
+    }
 
     # ---- Aggregate per-branch score ----
     D_comp_b <- mean(c(D_res$D_early %||% NA_real_, D_res$D_term %||% NA_real_), na.rm = TRUE)
@@ -295,6 +324,13 @@ compute_single_doe_branched <- function(expr_or_seurat,
 #' @param pseudotime_list Named list of pseudotime vectors (one per trajectory).
 #' @param parallel Logical; evaluate trajectories in parallel when possible.
 #' @param n_cores Number of workers to use for parallel evaluation.
+#' @param plot_metrics Logical; if `TRUE`, draw the D/O/E diagnostic plots for
+#'   each branch of each trajectory, including the `plot_E` GMM plot when
+#'   also `TRUE` (see [compute_single_doe_branched()]). Defaults to `NULL`,
+#'   which is treated as `FALSE` (no plotting at all).
+#' @param pseudotime_rescale Logical; if `TRUE` (default), min-max normalize
+#'   each branch's pseudotime to \[0,1\] before computing D/O/E. See
+#'   [compute_single_doe_branched()] for details.
 #' @param tol Numerical tolerance forwarded to `compute_single_doe_branched()`.
 #'
 #' @return A list with class `"multi_doe_branched"` containing per-trajectory
@@ -311,9 +347,11 @@ compute_multi_doe_branched <- function(expr_or_seurat,
                                         assay = NULL,
                                         slot  = "data",
                                         plot_E = FALSE,
+                                        plot_metrics = NULL,
                                         verbose = TRUE,
                                         parallel = FALSE,
                                         n_cores = NULL,
+                                        pseudotime_rescale = TRUE,
                                         tol = 1e-8) {
 
   E_method <- match.arg(E_method)
@@ -335,7 +373,9 @@ compute_multi_doe_branched <- function(expr_or_seurat,
       assay = assay,
       slot = slot,
       plot_E = plot_E,
+      plot_metrics = plot_metrics,
       verbose = verbose,
+      pseudotime_rescale = pseudotime_rescale,
       tol = tol
     )
     out$trajectory <- name

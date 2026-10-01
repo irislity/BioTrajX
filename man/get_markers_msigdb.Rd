@@ -41,7 +41,7 @@ via \code{\link[=grepl]{grepl()}}, and matching sets are unioned.}
 A \code{marker_set} with \verb{$early} and \verb{$terminal} character vectors.
 }
 \description{
-Queries the Molecular Signatures Database and returns a \link{marker_set} whose
+Queries the Molecular Signatures Database and returns a \code{marker_set} whose
 \verb{$early} and \verb{$terminal} slots can be passed directly to any BioTrajX
 function.
 }

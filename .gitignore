@@ -12,3 +12,5 @@ renv.lock
 output/
 Rplots.pdf
 vignettes/*.html
+vignettes/data/*.rds
+.RDataTmp

@@ -32,7 +32,7 @@ plot_metrics_o(
 
 \item{point_cex}{numeric, point size for per-cell dots}
 
-\item{point_alpha}{numeric in \link{0,1}, transparency for dots}
+\item{point_alpha}{numeric in [0,1], transparency for dots}
 
 \item{line_lwd}{numeric, line width for isotonic fit}
 

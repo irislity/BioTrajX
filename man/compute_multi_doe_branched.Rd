@@ -15,9 +15,11 @@ compute_multi_doe_branched(
   assay = NULL,
   slot = "data",
   plot_E = FALSE,
+  plot_metrics = NULL,
   verbose = TRUE,
   parallel = FALSE,
   n_cores = NULL,
+  pseudotime_rescale = TRUE,
   tol = 1e-08
 )
 }
@@ -45,13 +47,24 @@ or \code{"combined"}.}
 
 \item{slot}{Assay slot to use when \code{expr_or_seurat} is a Seurat object.}
 
-\item{plot_E}{Logical; pass through to \code{metrics_e()} plotting helpers.}
+\item{plot_E}{Logical; pass through to \code{metrics_e()} plotting helpers.
+Only takes effect when \code{plot_metrics} is \code{TRUE}; \code{plot_metrics} gates
+all plotting, and \code{plot_E} fine-tunes this one plot within that.}
+
+\item{plot_metrics}{Logical; if \code{TRUE}, draw the D/O/E diagnostic plots for
+each branch of each trajectory, including the \code{plot_E} GMM plot when
+also \code{TRUE} (see \code{\link[=compute_single_doe_branched]{compute_single_doe_branched()}}). Defaults to \code{NULL},
+which is treated as \code{FALSE} (no plotting at all).}
 
 \item{verbose}{Logical; print progress messages.}
 
 \item{parallel}{Logical; evaluate trajectories in parallel when possible.}
 
 \item{n_cores}{Number of workers to use for parallel evaluation.}
+
+\item{pseudotime_rescale}{Logical; if \code{TRUE} (default), min-max normalize
+each branch's pseudotime to [0,1] before computing D/O/E. See
+\code{\link[=compute_single_doe_branched]{compute_single_doe_branched()}} for details.}
 
 \item{tol}{Numerical tolerance forwarded to \code{compute_single_doe_branched()}.}
 }

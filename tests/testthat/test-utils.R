@@ -86,3 +86,53 @@ test_that("reverse_pseudotime: Inf input throws error or returns NA", {
   out <- reverse_pseudotime(pt)
   expect_true(any(!is.finite(out)))
 })
+
+# =============================================================================
+# .minmax_normalize() — internal helper backing reverse_pseudotime() and the
+# pseudotime_rescale option in compute_single_doe_linear()/_branched()
+# =============================================================================
+
+test_that(".minmax_normalize: output is in [0, 1]", {
+  pt  <- seq(100, 900, length.out = 50)
+  out <- BioTrajX:::.minmax_normalize(pt)
+  expect_true(all(out >= 0 & out <= 1))
+})
+
+test_that(".minmax_normalize: minimum maps to 0, maximum maps to 1", {
+  pt  <- c(100, 250, 600, 900)
+  out <- BioTrajX:::.minmax_normalize(pt)
+  expect_equal(out[which.min(pt)], 0)
+  expect_equal(out[which.max(pt)], 1)
+})
+
+test_that(".minmax_normalize: preserves rank order (unlike reverse_pseudotime)", {
+  pt  <- c(5, 1, 9, 3)
+  out <- BioTrajX:::.minmax_normalize(pt)
+  expect_equal(rank(out), rank(pt))
+})
+
+test_that(".minmax_normalize: is a linear rescaling of the input", {
+  pt  <- runif(30, min = -50, max = 200)
+  out <- BioTrajX:::.minmax_normalize(pt)
+  expect_equal(unname(cor(pt, out)), 1, tolerance = 1e-10)
+})
+
+test_that(".minmax_normalize: identical values return zeros with warning", {
+  expect_warning(
+    out <- BioTrajX:::.minmax_normalize(rep(7, 10)),
+    "identical"
+  )
+  expect_true(all(out == 0))
+})
+
+test_that(".minmax_normalize: NAs are preserved, not included in min/max", {
+  pt  <- c(1, NA, 5, 10)
+  out <- BioTrajX:::.minmax_normalize(pt)
+  expect_true(is.na(out[2]))
+  expect_equal(out[!is.na(out)], c(0, 4/9, 1))
+})
+
+test_that(".minmax_normalize: reverse_pseudotime(x) == 1 - .minmax_normalize(x)", {
+  pt <- seq(2, 20, length.out = 15)
+  expect_equal(reverse_pseudotime(pt), 1 - BioTrajX:::.minmax_normalize(pt))
+})

@@ -15,7 +15,9 @@ compute_single_doe_branched(
   assay = NULL,
   slot = "data",
   plot_E = FALSE,
+  plot_metrics = NULL,
   verbose = TRUE,
+  pseudotime_rescale = TRUE,
   tol = 1e-08
 )
 }
@@ -42,9 +44,24 @@ or \code{"combined"}.}
 
 \item{slot}{Assay slot to use when \code{expr_or_seurat} is a Seurat object.}
 
-\item{plot_E}{Logical; pass through to \code{metrics_e()} plotting helpers.}
+\item{plot_E}{Logical; pass through to \code{metrics_e()} plotting helpers.
+Only takes effect when \code{plot_metrics} is \code{TRUE}; \code{plot_metrics} gates
+all plotting, and \code{plot_E} fine-tunes this one plot within that.}
+
+\item{plot_metrics}{Logical; if \code{TRUE}, draw the D/O/E diagnostic plots
+(\code{plot_metrics_d()}, \code{plot_metrics_o()}, \code{plot_metrics_e()}, and, when
+\code{plot_E} is also \code{TRUE}, the internal GMM density plot from
+\code{metrics_e()}) for each branch after computing its metrics. Defaults to
+\code{NULL}, which is treated as \code{FALSE} (no plotting at all).}
 
 \item{verbose}{Logical; print progress messages.}
+
+\item{pseudotime_rescale}{Logical; if \code{TRUE} (default), min-max normalize
+each branch's pseudotime to [0,1] (independently, after subsetting)
+before computing D/O/E. Set to \code{FALSE} to use the raw pseudotime values
+as provided. D/O/E are each invariant to monotonic transforms of
+pseudotime, so this only affects the scale shown in diagnostic plots,
+not the computed scores.}
 
 \item{tol}{Numerical tolerance forwarded to \code{metrics_o()} when supported.}
 }

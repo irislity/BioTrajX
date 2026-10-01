@@ -43,7 +43,7 @@ A \code{marker_set} with \verb{$early} and \verb{$terminal} character vectors.
 }
 \description{
 Fetches cell-type marker genes from the CellMarker database and returns a
-\link{marker_set}.  When \code{df = NULL} (default) the relevant species table is
+\code{marker_set}.  When \code{df = NULL} (default) the relevant species table is
 downloaded automatically from
 \url{http://xteam.xbio.top/CellMarker/download.jsp}.  Pass a pre-loaded data
 frame to \code{df} to work offline or with a custom table.

@@ -16,14 +16,14 @@ the early / root state.}
 If \code{NULL}, defaults to human via \code{org.Hs.eg.db}.}
 
 \item{ont}{Ontology filter: \code{"BP"}, \code{"CC"}, \code{"MF"}, or \code{"ALL"} (default).
-Applied to the \code{ONTOLOGYALL} column returned by \code{\link[AnnotationDbi:select]{AnnotationDbi::select()}}.}
+Applied to the \code{ONTOLOGYALL} column returned by \code{AnnotationDbi::select()}.}
 }
 \value{
 A \code{marker_set} with \verb{$early} and \verb{$terminal} character vectors.
 }
 \description{
 Maps GO term IDs to gene symbols using an OrgDb annotation package and
-returns a \link{marker_set}.  Requires \code{AnnotationDbi} and an OrgDb package
+returns a \code{marker_set}.  Requires \code{AnnotationDbi} and an OrgDb package
 (defaults to \code{org.Hs.eg.db} for human).
 }
 \examples{

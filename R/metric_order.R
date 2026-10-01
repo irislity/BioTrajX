@@ -41,7 +41,7 @@
 #' @param early_markers character vector of early/root marker gene names.
 #' @param terminal_markers character vector of terminal marker gene names.
 #' @param pseudotime numeric vector of length \code{ncol(expr)}.
-#' @param iqr_quantile numeric in [0,1]; genes whose IQR falls below this
+#' @param iqr_quantile numeric in \[0,1\]; genes whose IQR falls below this
 #'   quantile are excluded before scoring (default 0.5).
 #' @param orientation_max logical; if \code{TRUE} (default) both pseudotime
 #'   orientations are evaluated and the higher O is returned.
@@ -50,7 +50,7 @@
 #'   higher O for a true signal.
 #'
 #' @return A list with:
-#'   \item{O}{scalar order-consistency score, null-calibrated to [0,1]}
+#'   \item{O}{scalar order-consistency score, null-calibrated to \[0,1\]}
 #'   \item{O_f}{named per-gene calibrated scores}
 #'   \item{genes_used}{character vector of genes used}
 #'   \item{n_cells}{number of cells}
@@ -179,7 +179,7 @@ metrics_o <- function(expr,
 #' @param terminal_markers character vector of terminal genes (expected to increase)
 #' @param top_n integer, number of example genes to plot with isotonic fits
 #' @param point_cex numeric, point size for per-cell dots
-#' @param point_alpha numeric in [0,1], transparency for dots
+#' @param point_alpha numeric in \[0,1\], transparency for dots
 #' @param line_lwd numeric, line width for isotonic fit
 #' @param main title across the whole figure
 #'

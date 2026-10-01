@@ -54,7 +54,7 @@ print.marker_set <- function(x, n = 6L, ...) {
 
 #' Retrieve marker genes from MSigDB via msigdbr
 #'
-#' Queries the Molecular Signatures Database and returns a [marker_set] whose
+#' Queries the Molecular Signatures Database and returns a `marker_set` whose
 #' `$early` and `$terminal` slots can be passed directly to any BioTrajX
 #' function.
 #'
@@ -145,7 +145,7 @@ get_markers_msigdb <- function(early,
 #' Retrieve marker genes from GO terms via AnnotationDbi
 #'
 #' Maps GO term IDs to gene symbols using an OrgDb annotation package and
-#' returns a [marker_set].  Requires `AnnotationDbi` and an OrgDb package
+#' returns a `marker_set`.  Requires `AnnotationDbi` and an OrgDb package
 #' (defaults to `org.Hs.eg.db` for human).
 #'
 #' @param early_terms Character vector of GO IDs (e.g. `"GO:0045588"`) for
@@ -154,7 +154,7 @@ get_markers_msigdb <- function(early,
 #' @param org_db An OrgDb object (e.g. `org.Hs.eg.db::org.Hs.eg.db`).
 #'   If `NULL`, defaults to human via `org.Hs.eg.db`.
 #' @param ont Ontology filter: `"BP"`, `"CC"`, `"MF"`, or `"ALL"` (default).
-#'   Applied to the `ONTOLOGYALL` column returned by [AnnotationDbi::select()].
+#'   Applied to the `ONTOLOGYALL` column returned by `AnnotationDbi::select()`.
 #'
 #' @return A `marker_set` with `$early` and `$terminal` character vectors.
 #'
@@ -272,7 +272,7 @@ get_markers_go <- function(early_terms,
 #' Retrieve marker genes from CellMarker
 #'
 #' Fetches cell-type marker genes from the CellMarker database and returns a
-#' [marker_set].  When `df = NULL` (default) the relevant species table is
+#' `marker_set`.  When `df = NULL` (default) the relevant species table is
 #' downloaded automatically from
 #' <http://xteam.xbio.top/CellMarker/download.jsp>.  Pass a pre-loaded data
 #' frame to `df` to work offline or with a custom table.
@@ -424,7 +424,7 @@ markers_to_list.data.frame <- function(x,
 
 #' Filter a marker_set to high-quality genes using expression data
 #'
-#' Applies a two-step expression-based filter to a [marker_set]:
+#' Applies a two-step expression-based filter to a `marker_set`:
 #'
 #' 1. **Dropout filter** — removes genes detected (non-zero) in fewer than
 #'    `min_detection` fraction of cells.  Genes that are zero in most cells
@@ -435,10 +435,10 @@ markers_to_list.data.frame <- function(x,
 #'
 #' Both steps are purely expression-based with no pseudotime or cluster
 #' assumptions, so there is no circularity with downstream DOE scoring.
-#' Accepts dense matrices, sparse [Matrix::dgCMatrix] objects, or [Seurat]
+#' Accepts dense matrices, sparse [Matrix::dgCMatrix-class] objects, or [Seurat]
 #' objects (normalised data layer is extracted automatically).
 #'
-#' @param ms A [marker_set] returned by `get_markers_msigdb()`,
+#' @param ms A `marker_set` returned by `get_markers_msigdb()`,
 #'   `get_markers_cellmarker()`, `get_markers_go()`, or `.marker_set()`.
 #' @param expr A genes-by-cells expression matrix (dense or sparse), or a
 #'   [Seurat] object.  Should contain log-normalised counts.
@@ -449,7 +449,7 @@ markers_to_list.data.frame <- function(x,
 #' @param min_detection Numeric in \[0, 1\].  Minimum fraction of cells in
 #'   which a gene must be detected (non-zero) to be retained.  Default `0.10`.
 #'
-#' @return A [marker_set] with filtered `$early` and `$terminal` vectors.
+#' @return A `marker_set` with filtered `$early` and `$terminal` vectors.
 #'   The `$source` field is appended with `" [filtered]"` and the original
 #'   gene counts and filter parameters are stored in `$metadata`.
 #'

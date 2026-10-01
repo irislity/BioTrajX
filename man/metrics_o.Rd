@@ -23,7 +23,7 @@ metrics_o(
 
 \item{pseudotime}{numeric vector of length \code{ncol(expr)}.}
 
-\item{iqr_quantile}{numeric in \link{0,1}; genes whose IQR falls below this
+\item{iqr_quantile}{numeric in [0,1]; genes whose IQR falls below this
 quantile are excluded before scoring (default 0.5).}
 
 \item{orientation_max}{logical; if \code{TRUE} (default) both pseudotime
@@ -35,7 +35,7 @@ higher O for a true signal.}
 }
 \value{
 A list with:
-\item{O}{scalar order-consistency score, null-calibrated to \link{0,1}}
+\item{O}{scalar order-consistency score, null-calibrated to [0,1]}
 \item{O_f}{named per-gene calibrated scores}
 \item{genes_used}{character vector of genes used}
 \item{n_cells}{number of cells}

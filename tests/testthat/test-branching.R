@@ -113,6 +113,39 @@ test_that("compute_single_doe_branched: n_cells_total equals sum of branch cell 
   expect_equal(res$n_cells_total, sum(res$weights))
 })
 
+test_that("compute_single_doe_branched: pseudotime_rescale = TRUE/FALSE give identical branch scores", {
+  f <- make_gaussian_branched_fixture()
+  pt_raw <- f$pseudotime * 500 + 100   # arbitrary raw units, not [0,1]
+
+  res_raw <- suppressWarnings(
+    compute_single_doe_branched(
+      f$expr, pt_raw,
+      early_markers_list    = f$early_markers_list,
+      terminal_markers_list = f$term_markers_list,
+      cluster_labels        = f$cluster_labels,
+      branch_filters        = f$branch_filters,
+      E_method = "gmm", plot_E = FALSE, verbose = FALSE,
+      pseudotime_rescale = FALSE
+    )
+  )
+  res_rescaled <- suppressWarnings(
+    compute_single_doe_branched(
+      f$expr, pt_raw,
+      early_markers_list    = f$early_markers_list,
+      terminal_markers_list = f$term_markers_list,
+      cluster_labels        = f$cluster_labels,
+      branch_filters        = f$branch_filters,
+      E_method = "gmm", plot_E = FALSE, verbose = FALSE,
+      pseudotime_rescale = TRUE
+    )
+  )
+
+  s_raw      <- vapply(res_raw$branches,      function(x) x$DOE_score, numeric(1))
+  s_rescaled <- vapply(res_rescaled$branches, function(x) x$DOE_score, numeric(1))
+  expect_equal(s_raw, s_rescaled)
+  expect_equal(res_raw$aggregate_DOE, res_rescaled$aggregate_DOE)
+})
+
 test_that("compute_single_doe_branched: unnamed branch lists throw error", {
   f <- make_branched_fixture()
   expect_error(

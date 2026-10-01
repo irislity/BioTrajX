@@ -33,11 +33,23 @@
 #' @param slot Slot to pull from a Seurat assay; typically `"data"` (default),
 #'   `"counts"`, or `"scale.data"`.
 #' @param plot_E Logical; if `TRUE`, allow `metrics_e()` to produce diagnostic
-#'   density plots when using the GMM mode (default `TRUE`).
+#'   density plots when using the GMM mode (default `TRUE`). Only takes effect
+#'   when `plot_metrics` is `TRUE`; `plot_metrics` gates all plotting, and
+#'   `plot_E` fine-tunes this one plot within that.
+#' @param plot_metrics Logical; if `TRUE`, draw the D/O/E diagnostic plots
+#'   (`plot_metrics_d()`, `plot_metrics_o()`, `plot_metrics_e()`, and, when
+#'   `plot_E` is also `TRUE`, the internal GMM density plot from
+#'   `metrics_e()`) after computing the metrics. Defaults to `NULL`, which is
+#'   treated as `FALSE` (no plotting at all).
 #' @param verbose Logical; if `TRUE`, print diagnostic messages when component
 #'   metrics fail and are caught (default `FALSE`).
 #' @param drop_unused_levels Logical; if `TRUE`, drop unused factor levels in
 #'   the subsetted cluster labels (default `TRUE`).
+#' @param pseudotime_rescale Logical; if `TRUE` (default), min-max normalize
+#'   `pseudotime` to \[0,1\] before computing D/O/E. Set to `FALSE` to use the
+#'   raw pseudotime values as provided. D/O/E are each invariant to monotonic
+#'   transforms of pseudotime, so this only affects the scale shown in
+#'   diagnostic plots, not the computed scores.
 #'
 #' @details
 #' The wrapper:
@@ -205,11 +217,13 @@ compute_single_doe_linear <- function(expr_or_seurat,
                                        assay = NULL,
                                        slot = "data",
                                        plot_E = TRUE,
+                                       plot_metrics = NULL,
                                        verbose = FALSE,
                                        branch_include = NULL,
                                        branch_exclude = NULL,
                                        branch_min_cells = 10,
                                        drop_unused_levels = TRUE,
+                                       pseudotime_rescale = TRUE,
                                        tol = 1e-8) {
   E_method   <- match.arg(E_method)
 
@@ -252,6 +266,14 @@ compute_single_doe_linear <- function(expr_or_seurat,
     if (!is.null(cluster_labels)) cluster_labels <- cluster_labels[valid]
   }
 
+  # Rescale pseudotime to [0,1] via min-max normalization so trajectories from
+  # different TI methods (which can emit wildly different raw ranges) are
+  # comparable, e.g. in the diagnostic plots below. D/O/E are each invariant
+  # to monotonic transforms of pseudotime, so this never changes their scores.
+  if (isTRUE(pseudotime_rescale)) {
+    pseudotime <- .minmax_normalize(pseudotime, label = "pseudotime values")
+  }
+
   # ---- D metric
   D_res <- tryCatch({
     metrics_d(expr, early_markers, terminal_markers, pseudotime)
@@ -284,6 +306,8 @@ compute_single_doe_linear <- function(expr_or_seurat,
     }
   )
   # ---- E metric
+  # plot_metrics gates all plotting; plot_E only fine-tunes the internal GMM
+  # density plot when plot_metrics is TRUE.
   E_res <- tryCatch({
     metrics_e(pseudotime,
               cluster_labels = cluster_labels,
@@ -292,7 +316,7 @@ compute_single_doe_linear <- function(expr_or_seurat,
               early_clusters = early_clusters,
               terminal_clusters = terminal_clusters,
               method = E_method,
-              plot = plot_E)
+              plot = isTRUE(plot_metrics) && isTRUE(plot_E))
   }, error = function(e) {
     if (verbose) message("E metric failed: ", e$message)
     list(E_early = NA_real_, E_term = NA_real_, E_comp = NA_real_, error = e$message)
@@ -315,11 +339,12 @@ compute_single_doe_linear <- function(expr_or_seurat,
   )
   class(out) <- "doe_results"
 
-
-  plot_metrics_d(pseudotime,D_res)
-  plot_metrics_o(expr,pseudotime,O_res,
-                 early_markers,terminal_markers)
-  plot_metrics_e(E_res)
+  if (isTRUE(plot_metrics)) {
+    plot_metrics_d(pseudotime,D_res)
+    plot_metrics_o(expr,pseudotime,O_res,
+                   early_markers,terminal_markers)
+    plot_metrics_e(E_res)
+  }
 
   return(out)
 
@@ -426,12 +451,19 @@ create_comparison_summary <- function(trajectory_results) {
 #' @param slot If `expr_or_seurat` is a Seurat object, the assay slot to
 #'   extract (e.g., `"data"`, `"counts"`). Default `"data"`.
 #' @param plot_E Logical; if `TRUE`, produce diagnostic density plots when
-#'   `E_method` uses GMM.
+#'   `E_method` uses GMM. Only takes effect when `plot_metrics` is `TRUE`.
+#' @param plot_metrics Logical; if `TRUE`, draw the D/O/E diagnostic plots for
+#'   each trajectory, including the `plot_E` GMM plot when also `TRUE` (see
+#'   [compute_single_doe_linear()]). Defaults to `NULL`, which is treated as
+#'   `FALSE` (no plotting at all).
 #' @param verbose Logical; print progress.
 #' @param parallel Logical; if `TRUE` and multiple trajectories are provided,
 #'   use **parallel** workers.
 #' @param n_cores Integer number of cores. If `NULL`, uses `detectCores()-1`.
 #' @param drop_unused_levels Logical; drop unused factor levels (where relevant).
+#' @param pseudotime_rescale Logical; if `TRUE` (default), min-max normalize
+#'   each trajectory's pseudotime to \[0,1\] before computing D/O/E. See
+#'   [compute_single_doe_linear()] for details.
 #' @param tol Numerical tolerance for internal numerical checks.
 #'
 #' @return
@@ -479,6 +511,7 @@ compute_multi_doe_linear <- function(
     assay               = NULL,
     slot                = "data",
     plot_E              = TRUE,
+    plot_metrics        = NULL,
     verbose             = TRUE,
     parallel            = FALSE,
     n_cores             = NULL,
@@ -486,6 +519,7 @@ compute_multi_doe_linear <- function(
     branch_exclude      = NULL,
     branch_min_cells    = 10,
     drop_unused_levels  = TRUE,
+    pseudotime_rescale  = TRUE,
     tol                 = 1e-8
 ) {
   E_method   <- match.arg(E_method)
@@ -534,11 +568,13 @@ compute_multi_doe_linear <- function(
           assay            = assay,
           slot             = slot,
           plot_E           = plot_E,
+          plot_metrics     = plot_metrics,
           verbose          = verbose,
           branch_include   = branch_include,
           branch_exclude   = branch_exclude,
           branch_min_cells = branch_min_cells,
           drop_unused_levels = drop_unused_levels,
+          pseudotime_rescale = pseudotime_rescale,
           tol               = tol
         )
         res$trajectory_name <- trajectory_name
@@ -573,7 +609,7 @@ compute_multi_doe_linear <- function(
         "compute_single_doe", "compute_single_doe_linear",
         "metrics_d", "metrics_o", "metrics_e",
         ".get_expr", ".per_cell_score", ".align_to_cells", "subset_by_clusters",
-        "%||%", ".has_formal", "tol"
+        "%||%", ".has_formal", ".minmax_normalize", "tol"
       ),
       envir = environment()
     )
@@ -581,7 +617,7 @@ compute_multi_doe_linear <- function(
       cl,
       varlist = c("metrics_d", "metrics_o", "metrics_e",
                   ".get_expr", ".per_cell_score", ".align_to_cells",
-                  "subset_by_clusters", "%||%", ".has_formal"),
+                  "subset_by_clusters", "%||%", ".has_formal", ".minmax_normalize"),
       envir = asNamespace("BioTrajX")
     )
 
