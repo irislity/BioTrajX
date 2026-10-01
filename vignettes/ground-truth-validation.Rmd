@@ -79,14 +79,19 @@ method_plots <- lapply(pt_cols, function(method) {
   df <- cbind(umap_df[, c("UMAP1", "UMAP2")], Pseudotime = gse@meta.data[[method]])
   ggplot2::ggplot(df, ggplot2::aes(UMAP1, UMAP2, colour = Pseudotime)) +
     ggplot2::geom_point(size = 0.5, alpha = 0.7) +
+    # Fixed limits (pseudotime is always on a [0, 1] scale here) so every
+    # panel's colour scale is identical — that's what lets patchwork collapse
+    # them into one shared legend instead of repeating it on every panel.
     ggplot2::scale_colour_distiller(palette = "Spectral", direction = -1,
-                                     na.value = "grey80") +
+                                     na.value = "grey80", limits = c(0, 1)) +
     ggplot2::theme_classic(base_size = 10) +
     ggplot2::labs(title = method)
 })
 
 if (requireNamespace("patchwork", quietly = TRUE)) {
-  patchwork::wrap_plots(c(list(p_day), method_plots), ncol = 3)
+  patchwork::wrap_plots(c(list(p_day), method_plots), ncol = 3) +
+    patchwork::plot_layout(guides = "collect") &
+    ggplot2::theme(legend.position = "right")
 } else {
   p_day
   method_plots
@@ -130,12 +135,9 @@ plot(res, type = "radar")
 plot(res, type = "heatmap")
 ```
 
-## 5. Bonus: does DOE_score track ground-truth recovery?
+## 5. Does DOE_score rank trajectories consistently with ground-truth recovery?
 
-DOE never sees the sampling day — it only sees marker genes, pseudotime, and
-(optionally) cluster labels. If DOE is doing its job, methods it scores
-highly should also be the ones whose pseudotime best recovers the real day
-ordering:
+Sampling day is not used in the DOE calculation and therefore provides an independent ground-truth reference. Here, we ask whether the ranking of trajectory configurations by DOE_score agrees with their ranking by recovery of the known temporal progression, quantified as the association between pseudotime and sampling day:
 
 ```{r ground-truth-check}
 day_lookup <- c(naive = 0, d3 = 3, d4 = 4, d5 = 5, d6 = 6, d7 = 7,
@@ -153,9 +155,4 @@ comparison[, c("trajectory", "DOE_score", "day_recovery")]
 cor.test(comparison$DOE_score, comparison$day_recovery, method = "pearson")
 ```
 
-`day_recovery` is kept signed (not absolute) deliberately: a method run
-backwards gets a negative Spearman rho against true day, and a trajectory
-with a genuinely wrong orientation should score low on DOE too — taking the
-absolute value would hide exactly the failure mode DOE is meant to catch.
-The strong positive correlation here (DOE score tracks day-recovery) is the
-real validation of DOE as a label-free proxy for ground truth.
+

@@ -61,14 +61,19 @@ method_plots <- lapply(pt_cols, function(method) {
   df <- cbind(umap_df[, c("UMAP1", "UMAP2")], Pseudotime = cd8t@meta.data[[method]])
   ggplot2::ggplot(df, ggplot2::aes(UMAP1, UMAP2, colour = Pseudotime)) +
     ggplot2::geom_point(size = 0.5, alpha = 0.7) +
+    # Fixed limits (pseudotime is always on a [0, 1] scale here) so every
+    # panel's colour scale is identical — that's what lets patchwork collapse
+    # them into one shared legend instead of repeating it on every panel.
     ggplot2::scale_colour_distiller(palette = "Spectral", direction = -1,
-                                     na.value = "grey80") +
+                                     na.value = "grey80", limits = c(0, 1)) +
     ggplot2::theme_classic(base_size = 10) +
     ggplot2::labs(title = method)
 })
 
 if (requireNamespace("patchwork", quietly = TRUE)) {
-  patchwork::wrap_plots(c(list(p_celltype), method_plots), ncol = 3)
+  patchwork::wrap_plots(c(list(p_celltype), method_plots), ncol = 3) +
+    patchwork::plot_layout(guides = "collect") &
+    ggplot2::theme(legend.position = "right")
 } else {
   p_celltype
   method_plots
@@ -147,7 +152,7 @@ plot(res, type = "radar")
 plot(res, type = "heatmap")
 ```
 
-## 6. Bonus: does DOE catch a bad root cell?
+## 6. Would biologically implausible root gives a low DOE score?
 
 A pseudotime trajectory rooted at the wrong starting cell runs "backwards" relative to the true biology. To check whether DOE catches that, we re-run Monocle3 from two different root cells — the `CD8.NaiveLike` centroid (the biologically correct start) and the `CD8.TEX` centroid (the wrong end of the trajectory) — and store both as new `meta.data` columns alongside the eight pre-computed methods. This needs `monocle3` and `SingleCellExperiment`, neither of which is a BioTrajX dependency:
 
