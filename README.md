@@ -29,6 +29,10 @@ The package implements three complementary metrics:
 - **Endpoint validity (E):** are expected early and terminal cells enriched at
   the corresponding ends of the trajectory?
 
+The composite `DOE_score` is the arithmetic mean of available D, O, and E
+components. A high score is evidence that the trajectory agrees with the
+biological prior encoded by the marker sets; it is not a replacement for
+visual inspection or independent validation.
 
 ![](man/figures/DOE.jpg)
 ![](man/figures/doe_schematic.png)
@@ -44,6 +48,42 @@ cell.
 ```r
 library(BioTrajX)
 ```
+
+### Linear trajectories
+
+```r
+# compute DOE metrics for a single trajectory
+result <- compute_single_doe_linear(expr, pseudotime, early_markers, terminal_markers)
+
+# compare multiple trajectories
+comparison <- compute_multi_doe_linear(expr, pseudotime_list, early_markers, terminal_markers)
+plot(comparison, type = "bar")
+plot(comparison, type = "radar")
+plot(comparison, type = "heatmap")
+```
+
+### Branched trajectories
+
+For a branched trajectory, provide one early and one terminal marker set per
+lineage and, when needed, restrict each branch to its own cell-state labels:
+
+```r
+branched <- compute_multi_doe_branched(
+  expr_or_seurat        = expr,
+  pseudotime_list       = pseudotime_list,
+  early_markers_list    = list(erythroid = stem_markers,
+                               b_cell = stem_markers),
+  terminal_markers_list = list(erythroid = erythroid_markers,
+                               b_cell = b_cell_markers),
+  cluster_labels        = cell_state,
+  branch_filters        = branch_filters
+)
+
+plot(branched, scope = "branch", type = "heatmap")
+plot(branched, scope = "overall", type = "bar")
+plot(res, scope = "branch", type = "radar", branch_mode = "facet")
+```
+
 ### Marker Sets
 Marker sets can be supplied manually or retrieved with
 `get_markers_msigdb()` and `get_markers_cellmarker()`. Use `filter_markers()`
