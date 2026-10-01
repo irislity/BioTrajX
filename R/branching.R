@@ -742,6 +742,17 @@ plot.multi_doe_branched <- function(multi_doe_branched,
     }
     
     if (type == "radar") {
+      # comparison_overall only ever carries one score per trajectory
+      # (aggregate_DOE) — no per-metric D/O/E breakdown exists at that level,
+      # so a radar (which needs >= 3 axes) can't be drawn here. fmsb fails
+      # ungracefully (and can leave the graphics device mid-plot) if we don't
+      # catch this first.
+      if (length(metrics) < 3) {
+        stop("plot(..., scope = \"overall\", type = \"radar\") needs at least 3 metrics, ",
+             "but comparison_overall only has: ", paste(metrics, collapse = ", "),
+             ". Use type = \"bar\" or \"heatmap\" for scope = \"overall\", or ",
+             "scope = \"branch\" for a per-metric (D/O/E) radar.")
+      }
       rd <- plot_data[, metrics, drop = FALSE]
       rd[is.na(rd)] <- 0
       for (m in metrics) rd[[m]] <- pmax(0, pmin(1, rd[[m]]))
@@ -752,7 +763,7 @@ plot.multi_doe_branched <- function(multi_doe_branched,
                        pcol = seq_len(n),
                        pfcol = scales::alpha(seq_len(n), 0.25),
                        plwd = 2, plty = 1, caxislabels = rep("", 5),
-                       cglcol = rgb(0, 0, 0, alpha = 0), cglty = 1,vlcex = 0,
+                       cglcol = rgb(0, 0, 0, alpha = 0), cglty = 1,
                        cglwd = 0.5, vlcex = 0.8, title = "Aggregate DOE Radar")
       graphics::legend("topright", legend = plot_data$trajectory,
                        col = seq_len(n), lty = 1, lwd = 2, bty = "n", cex = 0.8)
@@ -935,8 +946,14 @@ plot.multi_doe_branched <- function(multi_doe_branched,
     }
 
     if (type == "radar") {
-      # separate: one radar per branch; others: a single radar containing all rows
-      to_radar <- function(df_rows, title = "DOE Metrics Radar") {
+      # Draws the radar only — no legend. A legend placed *inside* the radar's
+      # own plot region (e.g. via inset/margin tricks) competes with fmsb's
+      # own vertex labels, and how much room that leaves depends on the
+      # device's absolute size, not just its aspect ratio — something that
+      # looked fine at one figure size clipped or vanished at another. The
+      # legend is instead drawn in its own reserved `layout()` row below,
+      # which is given a fixed fraction of the device regardless of size.
+      draw_radar <- function(df_rows, title = "DOE Metrics Radar") {
         mat <- as.data.frame(df_rows[, metrics, drop = FALSE])
         mat[is.na(mat)] <- 0
         for (m in metrics) mat[[m]] <- pmax(0, pmin(1, mat[[m]]))
@@ -948,29 +965,56 @@ plot.multi_doe_branched <- function(multi_doe_branched,
                          pfcol = scales::alpha(seq_len(n), 0.25),
                          plwd = 2, plty = 1,
                          cglcol = "grey", cglty = 1, axislabcol = "grey", caxislabels = rep("",5),
-                         cglwd = 0.5, vlcex = 0, title = title)
-        graphics::legend("topright", legend = rownames(df_rows),
-                         col = seq_len(n), lty = 1, lwd = 2, bty = "n", cex = 0.8)
+                         cglwd = 0.5, vlcex = 0.8, title = title)
       }
-      
-      if (branch_mode == "separate") {
+      draw_legend_panel <- function(labels, ncol) {
+        n <- length(labels)
+        graphics::plot.new()
+        graphics::legend("center", legend = labels, col = seq_len(n),
+                         lty = 1, lwd = 2, bty = "n", cex = 0.8, ncol = ncol)
+      }
+
+      if (branch_mode %in% c("facet", "separate")) {
+        # Radar has no ggplot-style facet; "facet" draws one panel per branch,
+        # same as "separate" — the same trajectory name recurring across
+        # branches can't share rownames in a single combined radar anyway.
         opar <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(opar))
         brs <- unique(plot_df$branch)
         n <- length(brs); nc <- ceiling(sqrt(n)); nr <- ceiling(n / nc)
-        graphics::par(mfrow = c(nr, nc), mar = c(1,1,2,1))
+        # Extra row spans all columns and holds one shared legend (every
+        # panel uses the same trajectory-to-colour mapping).
+        layout_mat <- rbind(matrix(seq_len(nr * nc), nrow = nr, ncol = nc, byrow = TRUE),
+                            rep(nr * nc + 1L, nc))
+        graphics::layout(layout_mat, heights = c(rep(4, nr), 1.3))
+        graphics::par(mar = c(1,1,2,1))
+        legend_labels <- NULL
         for (b in brs) {
           dfb <- plot_df[plot_df$branch == b, c("trajectory", metrics), drop = FALSE]
           rownames(dfb) <- dfb$trajectory
           dfb$trajectory <- NULL
-          to_radar(dfb, title = paste("Branch:", b))
+          draw_radar(dfb, title = paste("Branch:", b))
+          if (is.null(legend_labels)) legend_labels <- rownames(dfb)
         }
+        graphics::par(mar = c(0,0,0,0))
+        draw_legend_panel(legend_labels, ncol = max(2L, ceiling(sqrt(length(legend_labels)))))
         return(invisible(NULL))
       } else {
-        # one radar: rows are either trajectory or trajectory [branch]
-        df <- plot_df[, c(if (branch_mode == "stack") "traj_label" else "trajectory", metrics), drop = FALSE]
-        rownames(df) <- df[[if (branch_mode == "stack") "traj_label" else "trajectory"]]
-        df[[if (branch_mode == "stack") "traj_label" else "trajectory"]] <- NULL
-        to_radar(df, title = "DOE Metrics Radar (Branches)")
+        # stack: one radar, rows disambiguated as "trajectory [branch]" — these
+        # labels run twice as long as a bare trajectory name, so keep to 2
+        # columns (more columns overflows the panel width), and grow the
+        # legend panel's height with however many rows that produces instead
+        # of a fixed height sized for the shorter facet/separate legends.
+        df <- plot_df[, c("traj_label", metrics), drop = FALSE]
+        rownames(df) <- df$traj_label
+        df$traj_label <- NULL
+        opar <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(opar))
+        legend_ncol <- 2L
+        legend_rows <- ceiling(nrow(df) / legend_ncol)
+        graphics::layout(matrix(c(1, 2), nrow = 2), heights = c(4, 0.5 + 0.45 * legend_rows))
+        graphics::par(mar = c(1,1,2,1))
+        draw_radar(df, title = "DOE Metrics Radar (Branches)")
+        graphics::par(mar = c(0,0,0,0))
+        draw_legend_panel(rownames(df), ncol = legend_ncol)
         return(invisible(NULL))
       }
     }

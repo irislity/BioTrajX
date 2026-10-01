@@ -1,0 +1,192 @@
+---
+title: "Evaluating Branched Pseudotime Trajectories with BioTrajX"
+output: github_document
+vignette: >
+  %\VignetteIndexEntry{Evaluating Branched Pseudotime Trajectories with BioTrajX}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 8,
+  fig.height = 5,
+  warning = FALSE,
+  message = FALSE,
+  eval = FALSE   # requires downloaded data — run interactively after loading stem_cell.rds
+)
+```
+
+This article walks through applying BioTrajX's DOE metrics to a branched
+haematopoietic stem cell differentiation dataset: aging mouse hematopoietic
+stem and progenitor cells, where the `Stem_Progenitors` compartment bifurcates
+into an erythroid lineage (`Erythroid_progenitors_Erythroblasts` →
+`Erythrocytes`) and a B-cell lineage (`Immature_B` → `Mature_B`). As in the
+linear-trajectory vignette, pseudotime from eight TI methods is already
+computed and stored as `meta.data` columns.
+
+## 1. Load the data
+
+```{r load}
+library(BioTrajX)
+library(Seurat)
+
+stem <- readRDS("data/stem_cell.rds")
+stem
+```
+
+`stem$Phenotype` holds the ten cell-type labels, and the same eight
+TI-method pseudotime columns used in the linear-trajectory vignette
+(`Slingshot`, `CytoTRACE`, `Monocle3`, `DPT`, `SCORPIUS`, `TSCAN`,
+`PAGA-DPT`, `Palantir`) are already present in `meta.data`.
+
+## 2. Visualize branch labels and pseudotime
+
+One UMAP panel for the `Phenotype` labels, plus one panel per TI method colored by that method's pseudotime:
+
+```{r visualize}
+pt_cols <- c("Slingshot", "CytoTRACE", "Monocle3", "DPT",
+             "SCORPIUS", "TSCAN", "PAGA-DPT", "Palantir")
+
+umap_df <- as.data.frame(Embeddings(stem, "umap"))
+colnames(umap_df) <- c("UMAP1", "UMAP2")
+umap_df$CellType <- stem$Phenotype[rownames(umap_df)]
+
+p_celltype <- ggplot2::ggplot(umap_df, ggplot2::aes(UMAP1, UMAP2, colour = CellType)) +
+  ggplot2::geom_point(size = 0.5, alpha = 0.7) +
+  ggplot2::theme_classic(base_size = 10) +
+  ggplot2::labs(title = "Cell type", colour = NULL)
+
+method_plots <- lapply(pt_cols, function(method) {
+  df <- cbind(umap_df[, c("UMAP1", "UMAP2")], Pseudotime = stem@meta.data[[method]])
+  ggplot2::ggplot(df, ggplot2::aes(UMAP1, UMAP2, colour = Pseudotime)) +
+    ggplot2::geom_point(size = 0.5, alpha = 0.7) +
+    ggplot2::scale_colour_distiller(palette = "Spectral", direction = -1,
+                                     na.value = "grey80") +
+    ggplot2::theme_classic(base_size = 10) +
+    ggplot2::labs(title = method)
+})
+
+if (requireNamespace("patchwork", quietly = TRUE)) {
+  patchwork::wrap_plots(c(list(p_celltype), method_plots), ncol = 3)
+} else {
+  p_celltype
+  method_plots
+}
+```
+
+## 3. Get lineage-specific markers
+
+Each branch needs its own early/terminal marker pair: a shared stem/
+progenitor signature as the "early" set, and a lineage-specific terminal
+signature per branch. `get_markers_msigdb()` pulls these by gene-set name,
+and `filter_markers()` keeps only the genes well-detected in this dataset.
+
+```{r markers}
+ms_ery <- get_markers_msigdb(
+  early    = "HAY_BONE_MARROW_CD34_POS_HSC",
+  terminal = "WP_ERYTHROPOIESIS",
+  species  = "Mus musculus"
+)
+ms_b <- get_markers_msigdb(
+  early    = "HAY_BONE_MARROW_CD34_POS_HSC",
+  terminal = "HADDAD_B_LYMPHOCYTE_PROGENITOR",
+  species  = "Mus musculus"
+)
+
+fm_ery <- filter_markers(ms_ery, stem, top_n = 30, min_detection = 0.10)
+fm_b   <- filter_markers(ms_b,   stem, top_n = 30, min_detection = 0.10)
+```
+
+## 4. Define the branch structure
+
+Branched DOE functions take `early_markers_list`/`terminal_markers_list` as
+**named lists keyed by branch name** — the union of these names defines the
+branches BioTrajX will evaluate. `branch_filters` then tells BioTrajX which
+`Phenotype` labels belong to each branch:
+
+```{r branch-structure}
+early_markers_list <- list(
+  Stem_to_Ery = fm_ery$early,
+  Stem_to_B   = fm_b$early
+)
+terminal_markers_list <- list(
+  Stem_to_Ery = fm_ery$terminal,
+  Stem_to_B   = fm_b$terminal
+)
+
+branch_filters <- list(
+  Stem_to_Ery = list(
+    include   = c("Stem_Progenitors", "Erythroid_progenitors_Erythroblasts", "Erythrocytes"),
+    min_cells = 50
+  ),
+  Stem_to_B = list(
+    include   = c("Stem_Progenitors", "Immature_B", "Mature_B"),
+    min_cells = 50
+  )
+)
+```
+
+## 5. Evaluate a single pseudotime trajectory
+
+```{r single-doe}
+res_single <- compute_single_doe_branched(
+  expr_or_seurat         = stem,
+  pseudotime             = stem$Monocle3,
+  early_markers_list     = early_markers_list,
+  terminal_markers_list  = terminal_markers_list,
+  cluster_labels         = "Phenotype",
+  branch_filters         = branch_filters,
+  E_method               = "gmm"
+)
+
+res_single$aggregate_DOE
+plot(res_single, type = "bar")
+plot(res_single, type = "radar")
+plot(res_single, type = "heatmap")
+```
+
+## 6. Compare all eight methods, per branch
+
+```{r multi-doe}
+pt_list <- setNames(lapply(pt_cols, function(col) stem@meta.data[[col]]), pt_cols)
+pt_list <- pt_list[sapply(pt_list, function(x) sum(!is.na(x)) > 10)]
+
+res <- compute_multi_doe_branched(
+  expr_or_seurat         = stem,
+  pseudotime_list        = pt_list,
+  early_markers_list     = early_markers_list,
+  terminal_markers_list  = terminal_markers_list,
+  cluster_labels         = "Phenotype",
+  branch_filters         = branch_filters,
+  E_method               = "gmm"
+)
+
+res$comparison_overall
+plot(res, scope = "branch", type = "bar", branch_mode = "facet")
+plot(res, scope = "branch", type = "radar", branch_mode = "facet")
+plot(res, scope = "branch", type = "heatmap", branch_mode = "facet")
+plot(res, scope = "overall", type = "bar")
+plot(res, scope = "overall", type = "heatmap")
+```
+
+`scope = "overall"` only carries one score per trajectory (`aggregate_DOE`) — there's no per-metric D/O/E breakdown at that level to put on a radar's axes, so `type = "radar"` isn't available for `scope = "overall"`; use `scope = "branch"` for a per-metric radar instead.
+
+## 7. Bonus: overall rank vs. per-branch rank
+
+A method that looks best overall is not necessarily the best choice for
+every branch — `compute_multi_doe_branched()` tracks branch-specific
+rankings precisely so you can catch that:
+
+```{r per-branch-rank}
+res$comparison_overall
+res$comparison_by_branch
+res$best_per_branch
+```
+
+A method that wins on the erythroid branch can rank far lower on the B-cell
+branch (and vice versa); the overall `aggregate_DOE` score is a cell-count-
+weighted average across branches, so it can mask a method that's excellent
+on one branch and poor on the other.
