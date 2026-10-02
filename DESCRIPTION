@@ -1,7 +1,7 @@
 Package: BioTrajX
 Type: Package
 Title: Directionality, Order, Endpoint Metrics for Trajectory Analysis
-Version: 0.0.0.9000
+Version: 0.1.0
 Authors@R: c(
     person("Tsz-Ying (Iris)", "Li",
            email = "irisliarbeit@gmail.com",
