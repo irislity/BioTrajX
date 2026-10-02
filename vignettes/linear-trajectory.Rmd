@@ -19,7 +19,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-This article walks through applying BioTrajX's DOE metrics to a CD8⁺ T-cell exhaustion dataset: head and neck squamous cell carcinoma tumor-infiltrating and peripheral-blood CD8⁺ T cells (GSE164690), annotated with ProjecTILs into five functional states — `CD8.NaiveLike`, `CD8.CM`, `CD8.EM`, `CD8.TPEX`, and `CD8.TEX` — that define the expected naive-to-exhausted progression. The dataset ships with pseudotime from eight trajectory inference (TI) methods already computed and stored as `meta.data` columns, so this vignette starts directly from that pre-computed Seurat object rather than re-running any TI method.
+This article walks through applying BioTrajX's DOE metrics to a CD8⁺ T-cell exhaustion dataset: head and neck squamous cell carcinoma tumor-infiltrating and peripheral-blood CD8⁺ T cells (GSE164690), annotated with ProjecTILs into functional states, of which this vignette uses four — `CD8.NaiveLike`, `CD8.EM`, `CD8.TPEX`, and `CD8.TEX` — that define the expected naive-to-exhausted progression; the dataset's fifth state, `CD8.CM`, is ignored. The dataset ships with pseudotime from eight trajectory inference (TI) methods already computed and stored as `meta.data` columns, so this vignette starts directly from that pre-computed Seurat object rather than re-running any TI method.
 
 ## 1. Load the data
 
@@ -29,16 +29,17 @@ library(Seurat)
 
 cd8t <- readRDS("data/cd8t.rds")
 
-# Order the five states naive-to-exhausted rather than alphabetically, so
-# plots below read low-to-high along the trajectory.
+# Order the states naive-to-exhausted rather than alphabetically, so plots
+# below read low-to-high along the trajectory. CD8.CM is left out of the
+# levels (and so ignored throughout this vignette) rather than ordered in.
 cd8t$functional.cluster <- factor(
   cd8t$functional.cluster,
-  levels = c("CD8.NaiveLike", "CD8.CM", "CD8.EM", "CD8.TPEX", "CD8.TEX")
+  levels = c("CD8.NaiveLike", "CD8.EM", "CD8.TPEX", "CD8.TEX")
 )
 cd8t
 ```
 
-`cd8t$functional.cluster` holds the five ProjecTILs states, and `cd8t@meta.data` already has one numeric column per TI method: `Slingshot`, `CytoTRACE`, `Monocle3`, `DPT`, `SCORPIUS`, `TSCAN`, `PAGA-DPT`, and `Palantir`.
+`cd8t$functional.cluster` holds the four ProjecTILs states this vignette uses, and `cd8t@meta.data` already has one numeric column per TI method: `Slingshot`, `CytoTRACE`, `Monocle3`, `DPT`, `SCORPIUS`, `TSCAN`, `PAGA-DPT`, and `Palantir`.
 
 ## 2. Visualize labels and pseudotime
 
@@ -82,31 +83,42 @@ if (requireNamespace("patchwork", quietly = TRUE)) {
 
 ## 3. Marker genes
 
-BioTrajX scores D and E using an "early" marker set (expected high in naive cells) and a "terminal" marker set (expected high in exhausted cells). This vignette uses the same curated signatures as the manuscript — the `CD8+ Tn` (naive) and `CD8+ GZMK+ Tex` (exhausted) panels from the pan-cancer T-cell atlas shipped by the [SlimR](https://github.com/zhaoqing-wang/SlimR) package. SlimR is not a BioTrajX dependency, so install it separately first:
+BioTrajX scores D and E using an "early" marker set (expected high in naive cells) and a "terminal" marker set (expected high in exhausted cells). This vignette combines two sources into one marker set: the `CD8+ Tn` (naive) panel from the pan-cancer T-cell atlas shipped by [SlimR](https://github.com/zhaoqing-wang/SlimR) for `early`, and the MSigDB signature `GSE9650_EFFECTOR_VS_EXHAUSTED_CD8_TCELL_DN` (pulled via `get_markers_msigdb()`) for `terminal`. Neither package is a BioTrajX dependency, so install both separately first:
 
-```{r install-slimr, eval = FALSE}
+```{r install-marker-pkgs, eval = FALSE}
 install.packages("SlimR")
+install.packages("msigdbr")
 ```
 
 ```{r markers}
-pctit <- SlimR::Markers_list_PCTIT
+pctit_s9  <- SlimR::Markers_list_PCTIT
+msigdb_s9 <- get_markers_msigdb(
+  early      = "GSE9650_EFFECTOR_VS_EXHAUSTED_CD8_TCELL_DN",
+  terminal   = "GSE9650_EFFECTOR_VS_EXHAUSTED_CD8_TCELL_DN",
+  collection = NULL,
+  species    = "Homo sapiens"
+)
 
-# filter_markers() dispatches on class "marker_set" — tag the SlimR lists as
-# one so they get the same detection-rate filtering get_markers_*() output does.
-ms <- structure(
-  list(early    = pctit[["CD8+ Tn"]]$Markers,
-       terminal = pctit[["CD8+ GZMK+ Tex"]]$Markers,
-       source   = "SlimR_PCTIT",
-       metadata = list()),
+# Combine the SlimR "early" panel with the MSigDB "terminal" signature into one
+# marker_set. filter_markers() only dispatches on the class, so building it by
+# hand with structure() — rather than the internal, unexported
+# BioTrajX:::.marker_set() — works identically to a get_markers_*() result.
+ms_s9 <- structure(
+  list(early    = pctit_s9[["CD8+ Tn"]]$Markers,
+       terminal = msigdb_s9$terminal,
+       source   = "SlimR_PCTIT + MSigDB",
+       metadata = list(early_set    = "CD8+ Tn",
+                        terminal_set = "GSE9650_EFFECTOR_VS_EXHAUSTED_CD8_TCELL_DN")),
   class = "marker_set"
 )
 
-filtered <- filter_markers(ms, cd8t, top_n = NULL, min_detection = 0.10)
-early_markers    <- filtered$early
-terminal_markers <- filtered$terminal
+ms_s9 <- filter_markers(ms_s9, cd8t, top_n = NULL, min_detection = 0.10)
+early_markers    <- ms_s9$early
+terminal_markers <- ms_s9$terminal
+c(early_markers = length(early_markers), terminal_markers = length(terminal_markers))
 ```
 
-`get_markers_msigdb()` and `get_markers_cellmarker()` are available as alternative, database-backed sources of early/terminal marker genes if you'd rather not depend on SlimR.
+`get_markers_cellmarker()` is available as another database-backed source of marker genes if you'd rather not depend on SlimR or msigdbr.
 
 ## 4. Evaluate a single pseudotime trajectory
 

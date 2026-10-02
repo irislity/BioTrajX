@@ -4,9 +4,10 @@ Evaluating Pseudotime Methods with BioTrajX (Linear Datasets)
 This article walks through applying BioTrajX’s DOE metrics to a CD8⁺
 T-cell exhaustion dataset: head and neck squamous cell carcinoma
 tumor-infiltrating and peripheral-blood CD8⁺ T cells (GSE164690),
-annotated with ProjecTILs into five functional states — `CD8.NaiveLike`,
-`CD8.CM`, `CD8.EM`, `CD8.TPEX`, and `CD8.TEX` — that define the expected
-naive-to-exhausted progression. The dataset ships with pseudotime from
+annotated with ProjecTILs into functional states, of which this vignette
+uses four — `CD8.NaiveLike`, `CD8.EM`, `CD8.TPEX`, and `CD8.TEX` — that
+define the expected naive-to-exhausted progression; the dataset’s fifth
+state, `CD8.CM`, is ignored. The dataset ships with pseudotime from
 eight trajectory inference (TI) methods already computed and stored as
 `meta.data` columns, so this vignette starts directly from that
 pre-computed Seurat object rather than re-running any TI method.
@@ -19,22 +20,23 @@ library(Seurat)
 
 cd8t <- readRDS("data/cd8t.rds")
 
-# Order the five states naive-to-exhausted rather than alphabetically, so
-# plots below read low-to-high along the trajectory.
+# Order the states naive-to-exhausted rather than alphabetically, so plots
+# below read low-to-high along the trajectory. CD8.CM is left out of the
+# levels (and so ignored throughout this vignette) rather than ordered in.
 cd8t$functional.cluster <- factor(
   cd8t$functional.cluster,
-  levels = c("CD8.NaiveLike", "CD8.CM", "CD8.EM", "CD8.TPEX", "CD8.TEX")
+  levels = c("CD8.NaiveLike", "CD8.EM", "CD8.TPEX", "CD8.TEX")
 )
 cd8t
 #> An object of class Seurat 
-#> 33545 features across 1942 samples within 1 assay 
+#> 33545 features across 1357 samples within 1 assay 
 #> Active assay: RNA (33545 features, 2000 variable features)
-#>  5 layers present: data, counts, scale.data.1, scale.data.2, scale.data
+#>  3 layers present: data, counts, scale.data
 #>  2 dimensional reductions calculated: pca, umap
 ```
 
-`cd8t$functional.cluster` holds the five ProjecTILs states, and
-`cd8t@meta.data` already has one numeric column per TI method:
+`cd8t$functional.cluster` holds the four ProjecTILs states this vignette
+uses, and `cd8t@meta.data` already has one numeric column per TI method:
 `Slingshot`, `CytoTRACE`, `Monocle3`, `DPT`, `SCORPIUS`, `TSCAN`,
 `PAGA-DPT`, and `Palantir`.
 
@@ -85,37 +87,50 @@ if (requireNamespace("patchwork", quietly = TRUE)) {
 
 BioTrajX scores D and E using an “early” marker set (expected high in
 naive cells) and a “terminal” marker set (expected high in exhausted
-cells). This vignette uses the same curated signatures as the manuscript
-— the `CD8+ Tn` (naive) and `CD8+ GZMK+ Tex` (exhausted) panels from the
-pan-cancer T-cell atlas shipped by the
-[SlimR](https://github.com/zhaoqing-wang/SlimR) package. SlimR is not a
-BioTrajX dependency, so install it separately first:
+cells). This vignette combines two sources into one marker set: the
+`CD8+ Tn` (naive) panel from the pan-cancer T-cell atlas shipped by
+[SlimR](https://github.com/zhaoqing-wang/SlimR) for `early`, and the
+MSigDB signature `GSE9650_EFFECTOR_VS_EXHAUSTED_CD8_TCELL_DN` (pulled
+via `get_markers_msigdb()`) for `terminal`. Neither package is a
+BioTrajX dependency, so install both separately first:
 
 ``` r
 install.packages("SlimR")
+install.packages("msigdbr")
 ```
 
 ``` r
-pctit <- SlimR::Markers_list_PCTIT
+pctit_s9  <- SlimR::Markers_list_PCTIT
+msigdb_s9 <- get_markers_msigdb(
+  early      = "GSE9650_EFFECTOR_VS_EXHAUSTED_CD8_TCELL_DN",
+  terminal   = "GSE9650_EFFECTOR_VS_EXHAUSTED_CD8_TCELL_DN",
+  collection = NULL,
+  species    = "Homo sapiens"
+)
 
-# filter_markers() dispatches on class "marker_set" — tag the SlimR lists as
-# one so they get the same detection-rate filtering get_markers_*() output does.
-ms <- structure(
-  list(early    = pctit[["CD8+ Tn"]]$Markers,
-       terminal = pctit[["CD8+ GZMK+ Tex"]]$Markers,
-       source   = "SlimR_PCTIT",
-       metadata = list()),
+# Combine the SlimR "early" panel with the MSigDB "terminal" signature into one
+# marker_set. filter_markers() only dispatches on the class, so building it by
+# hand with structure() — rather than the internal, unexported
+# BioTrajX:::.marker_set() — works identically to a get_markers_*() result.
+ms_s9 <- structure(
+  list(early    = pctit_s9[["CD8+ Tn"]]$Markers,
+       terminal = msigdb_s9$terminal,
+       source   = "SlimR_PCTIT + MSigDB",
+       metadata = list(early_set    = "CD8+ Tn",
+                        terminal_set = "GSE9650_EFFECTOR_VS_EXHAUSTED_CD8_TCELL_DN")),
   class = "marker_set"
 )
 
-filtered <- filter_markers(ms, cd8t, top_n = NULL, min_detection = 0.10)
-early_markers    <- filtered$early
-terminal_markers <- filtered$terminal
+ms_s9 <- filter_markers(ms_s9, cd8t, top_n = NULL, min_detection = 0.10)
+early_markers    <- ms_s9$early
+terminal_markers <- ms_s9$terminal
+c(early_markers = length(early_markers), terminal_markers = length(terminal_markers))
+#>    early_markers terminal_markers 
+#>               20               23
 ```
 
-`get_markers_msigdb()` and `get_markers_cellmarker()` are available as
-alternative, database-backed sources of early/terminal marker genes if
-you’d rather not depend on SlimR.
+`get_markers_cellmarker()` is available as another database-backed
+source of marker genes if you’d rather not depend on SlimR or msigdbr.
 
 ## 4. Evaluate a single pseudotime trajectory
 
@@ -134,7 +149,7 @@ res_single <- compute_single_doe_linear(
 )
 
 res_single$DOE_score
-#> [1] 0.7697032
+#> [1] 0.5432022
 plot(res_single, type = "bar")
 ```
 
@@ -192,38 +207,38 @@ res <- compute_multi_doe_linear(
 #> 
 #> ==========================================================
 #> Multi-trajectory DOE analysis complete!
-#> Best trajectory: SCORPIUS (DOE score: 0.789)
+#> Best trajectory: TSCAN (DOE score: 0.598)
 
 res$comparison_summary
 #>   trajectory   D_early    D_term    D_comp         O O_orientation   E_early
-#> 1   SCORPIUS 0.7680069 0.8713326 0.8196698 0.8979655             + 0.5493827
-#> 2   Palantir 0.7647302 0.8356365 0.8001833 0.9076004             + 0.5781893
-#> 3      TSCAN 0.7651012 0.8498823 0.8074917 0.8952219             + 0.5367483
-#> 4  CytoTRACE 0.8072178 0.7958930 0.8015554 0.9192523             + 0.5925926
-#> 5   Monocle3 0.7623016 0.8462281 0.8042648 0.8542853             + 0.5864198
-#> 6   PAGA-DPT 0.7679280 0.8445120 0.8062200 0.8468488             + 0.5534979
-#> 7  Slingshot 0.7724571 0.8329140 0.8026855 0.5507964             + 0.5740741
-#> 8        DPT 0.7826816 0.8499346 0.8163081 0.4920760             + 0.5534979
+#> 1      TSCAN 0.7070410 0.4508281 0.5789345 0.7297995             + 0.4342105
+#> 2   Monocle3 0.7053013 0.3740680 0.5396846 0.6257121             + 0.4365782
+#> 3   PAGA-DPT 0.6922741 0.2850180 0.4886460 0.6530323             + 0.3716814
+#> 4  CytoTRACE 0.7840763 0.1918649 0.4879706 0.6114504             + 0.4867257
+#> 5  Slingshot 0.7189100 0.3226085 0.5207593 0.4716572             + 0.4336283
+#> 6   Palantir 0.6088216 0.1992569 0.4040393 0.6275072             + 0.3392330
+#> 7   SCORPIUS 0.7148566 0.2755311 0.4951938 0.5421092             + 0.3864307
+#> 8        DPT 0.7308194 0.3092885 0.5200540 0.2625789             + 0.4129794
 #>      E_term    E_comp DOE_score has_error D_early_rank D_term_rank D_comp_rank
-#> 1 0.7901235 0.6481197 0.7885850     FALSE            4           1           1
-#> 2 0.7181070 0.6405970 0.7827936     FALSE            7           6           8
-#> 3 0.7572383 0.6282080 0.7769739     FALSE            6           3           3
-#> 4 0.5987654 0.5956630 0.7721569     FALSE            1           8           7
-#> 5 0.7304527 0.6505594 0.7697032     FALSE            8           4           5
-#> 6 0.7613169 0.6409835 0.7646841     FALSE            5           5           4
-#> 7 0.7448560 0.6484082 0.6672967     FALSE            3           7           6
-#> 8 0.7345679 0.6313060 0.6465634     FALSE            2           2           2
+#> 1 0.5526316 0.4863158 0.5983500     FALSE            5           1           1
+#> 2 0.4955752 0.4642097 0.5432022     FALSE            6           2           2
+#> 3 0.5162242 0.4321877 0.5246220     FALSE            7           5           6
+#> 4 0.3156342 0.3829386 0.4941199     FALSE            1           8           7
+#> 5 0.5103245 0.4688606 0.4870924     FALSE            3           3           3
+#> 6 0.5132743 0.4084882 0.4800115     FALSE            8           7           8
+#> 7 0.3008850 0.3383342 0.4585457     FALSE            4           6           5
+#> 8 0.4867257 0.4468301 0.4098210     FALSE            2           4           4
 #>   O_rank E_early_rank E_term_rank E_comp_rank DOE_score_rank
-#> 1      3            7           1           3              1
-#> 2      2            3           7           5              2
-#> 3      4            8           3           7              3
-#> 4      1            1           8           8              4
-#> 5      5            2           6           1              5
-#> 6      6            5           2           4              6
-#> 7      7            4           4           2              7
-#> 8      8            5           5           6              8
+#> 1      1            3           1           1              1
+#> 2      4            2           5           3              2
+#> 3      2            7           2           5              3
+#> 4      5            1           7           7              4
+#> 5      7            4           4           2              5
+#> 6      3            8           3           6              6
+#> 7      6            6           8           8              7
+#> 8      8            5           6           4              8
 res$best_trajectory
-#> [1] "SCORPIUS"
+#> [1] "TSCAN"
 plot(res, type = "bar")
 ```
 
@@ -334,8 +349,8 @@ data.frame(
   DOE_score = c(res_root_naive$DOE_score, res_root_tex$DOE_score)
 )
 #>                     root DOE_score
-#> 1 CD8.NaiveLike centroid 0.7307730
-#> 2       CD8.TEX centroid 0.2755454
+#> 1 CD8.NaiveLike centroid 0.5432022
+#> 2       CD8.TEX centroid 0.1983723
 ```
 
 Rooting Monocle3 at the exhausted end rather than the naive end lowers
