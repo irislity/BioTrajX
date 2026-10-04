@@ -97,6 +97,19 @@ fm_ery <- filter_markers(ms_ery, stem, top_n = 30, min_detection = 0.10)
 fm_b   <- filter_markers(ms_b,   stem, top_n = 30, min_detection = 0.10)
 ```
 
+`species = "Mus musculus"` with human-named gene sets (e.g.
+`WP_ERYTHROPOIESIS`) makes `msigdbr` map human MSigDB to mouse via
+orthology rather than querying mouse-native collections — that’s
+expected here, since these signature names only exist in the human
+MSigDB. If this errors with `No gene sets found for: ...` on a set
+that clearly exists, check `packageVersion("msigdbr")`: 26.1.0 shipped
+with an ortholog-table caching bug that could silently drop genes (or
+whole sets) from the second `msigdbr()` call in a session when mapping
+human to mouse. Run `install.packages("msigdbr")` to pick up 26.1.1+,
+which fixes it (BioTrajX’s `DESCRIPTION` requires `msigdbr >= 26.1.1`
+for this reason). If the update doesn’t take effect, restart R — like
+`rlang`, an already-loaded `msigdbr` can’t be swapped out mid-session.
+
 ## 4. Define the branch structure
 
 Branched DOE functions take `early_markers_list`/`terminal_markers_list`
