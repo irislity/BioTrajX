@@ -7,6 +7,4 @@
 ^pkgdown$
 ^LICENSE\.md$
 .Rhistory
-^vignettes/articles$
-^tutorials$
 ^output$
