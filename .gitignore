@@ -7,8 +7,6 @@
 .quarto
 docs
 inst/doc
-renv/
-renv.lock
 output/
 Rplots.pdf
 vignettes/*.html
