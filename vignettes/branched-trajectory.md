@@ -16,6 +16,12 @@ stored as `meta.data` columns.
 library(BioTrajX)
 library(Seurat)
 
+dir.create("data", showWarnings = FALSE)
+download.file(
+  "<ZENODO FILE URL>/stem_cell.rds",
+  "data/stem_cell.rds",
+  mode = "wb"
+)
 stem <- readRDS("data/stem_cell.rds")
 stem
 #> An object of class Seurat 

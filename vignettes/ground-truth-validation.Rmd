@@ -41,6 +41,12 @@ computed and stored as `meta.data` columns.
 library(BioTrajX)
 library(Seurat)
 
+dir.create("data", showWarnings = FALSE)
+download.file(
+  "<ZENODO FILE URL>/GSE131847_seu.rds",
+  "data/GSE131847_seu.rds",
+  mode = "wb"
+)
 gse <- readRDS("data/GSE131847_seu.rds")
 DefaultAssay(gse) <- "SCT"
 gse

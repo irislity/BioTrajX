@@ -27,6 +27,12 @@ This article walks through applying BioTrajX's DOE metrics to a CD8⁺ T-cell ex
 library(BioTrajX)
 library(Seurat)
 
+dir.create("data", showWarnings = FALSE)
+download.file(
+  "<ZENODO FILE URL>/cd8t.rds",
+  "data/cd8t.rds",
+  mode = "wb"
+)
 cd8t <- readRDS("data/cd8t.rds")
 
 # Order the states naive-to-exhausted rather than alphabetically, so plots
@@ -200,7 +206,7 @@ centroid_cell <- function(obj, cluster, label_col = "functional.cluster", n_pcs 
 root_naive <- centroid_cell(cd8t, "CD8.NaiveLike")
 root_tex   <- centroid_cell(cd8t, "CD8.TEX")
 
-run_monocle3_from_root <- function(seurat, start_cell, genes) {
+run_monocle3_from_root <- function(seurat, start_cell, genes, seed = 1L) {
   expr <- as.matrix(GetAssayData(seurat, assay = "RNA", layer = "data"))[genes, ]
   cds  <- monocle3::new_cell_data_set(
     Matrix::Matrix(expr, sparse = TRUE),
@@ -208,6 +214,10 @@ run_monocle3_from_root <- function(seurat, start_cell, genes) {
     gene_metadata = data.frame(gene_short_name = rownames(expr), row.names = rownames(expr))
   )
   cds <- monocle3::preprocess_cds(cds, num_dim = min(30L, ncol(expr) - 1L))
+  # reduce_dimension()'s UMAP step has no seed argument of its own and draws
+  # on R's global RNG state, so without pinning it here the embedding (and
+  # therefore the resulting DOE_score) drifts slightly between runs/machines.
+  set.seed(seed)
   cds <- monocle3::reduce_dimension(cds, reduction_method = "UMAP")
   cds <- monocle3::cluster_cells(cds)
   cds <- monocle3::learn_graph(cds, use_partition = FALSE)
