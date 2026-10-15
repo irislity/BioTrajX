@@ -1,6 +1,7 @@
 # BioTrajX
 
 > *Pronounced "BY-oh-TRADJ-ex" — Bio(logy) + Traj(ectory) + eX(amine).*
+
 BioTrajX is an easy-to-use, lightweight R package for evaluating whether single-cell trajectories are biologically plausible. It is independent of the trajectory inference method and is designed to compare alternative pseudotime orderings, branch-specific trajectories, and root-cell choices before downstream analysis.
 
 BioTrajX provides Directionality, Order, and Endpoint (DOE) metrics for quantitatively evaluating single-cell pseudotime orderings by different trajectory inference methods or produced by different root cell against prior biological knowledge. The package includes wrappers for linear and branched trajectories, along with visualization tools for summarizing and comparing results across competing trajectory inference methods.
