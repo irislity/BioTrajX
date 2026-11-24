@@ -123,7 +123,7 @@ If you use BioTrajX in your research, please cite the accompanying preprint:
   note    = {Preprint}
 }
 ```
-BioTrajX is released under the [MIT license](LICENSE).
+BioTrajX is released under the [MIT license](LICENSE.md).
 
 
 
