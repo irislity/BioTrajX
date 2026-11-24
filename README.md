@@ -110,8 +110,20 @@ to retain genes detected in the data before scoring.
 
 ## Citation and license
 
-If you use BioTrajX, please cite the accompanying manuscript. BioTrajX is
-released under the MIT license.
+If you use BioTrajX in your research, please cite the accompanying preprint:
+
+```bibtex
+@article{li2026biotrajx,
+  title   = {{BioTrajX}: evaluating biological plausibility in single-cell trajectory inference},
+  author  = {Li, Tsz Ying and Chang, Yao-Ming and Chen, Shih-Yu},
+  journal = {bioRxiv},
+  year    = {2026},
+  doi     = {10.64898/2026.11.02.763572},
+  url     = {https://doi.org/10.64898/2026.11.02.763572},
+  note    = {Preprint}
+}
+```
+BioTrajX is released under the [MIT license](LICENSE).
 
 
 
